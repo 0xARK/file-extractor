@@ -66,6 +66,7 @@ void monitor_folder() {
 
     if (file_descriptor < 0) perror("inotify_init");
 
+    // /!\ number of inotify_add_watch calls are limited by value in /proc/sys/fs/inotify/max_user_watches
     watch_descriptor = inotify_add_watch(file_descriptor, "../../monitored-folder-1",IN_CREATE);
     length = read(file_descriptor, buffer, BUF_LEN);
 
