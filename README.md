@@ -1,0 +1,2 @@
+- Expliquer le choix des librairies
+- Expliquer le choix de terminaison du client (pas d'info sur comment le programme devait être lancé/terminé, donc j'ai choisi de faire en sorte qu'il puisse être quitté proprement en libérant la mémoire avant de quitter, même si cela ne peut pas forcément être géré dans tous les cas d'usage, ex si le script est lancé par un autre process ou que le script est lancé dans un SSH)

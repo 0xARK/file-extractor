@@ -1,4 +1,4 @@
-#include <stdio.h>
+#include "server.h"
 
 int main() {
     printf("This is server!\n");

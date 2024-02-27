@@ -1,11 +1,4 @@
-#include <stdio.h>
-#include <ctype.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/inotify.h>
-
-#define EVENT_SIZE  (sizeof(struct inotify_event))
-#define BUF_LEN     (1024 * (EVENT_SIZE + 16))
+#include "client.h"
 
 /**
  * This client allows to monitor a list of folder for newly created files. The new files are then sent to the server
@@ -16,15 +9,19 @@
  * @return exit code
  */
 int main(int argc, char **argv) {
-    int port = 0;
-    char *host = NULL;
-    int index;
-    int c;
+    int port;
+    char* host = NULL;
+    int i;
+    int opt;
+    int folders_size;
+    char** folders = NULL;
+    int argv_index;
 
     opterr = 0;
 
-    while ((c = getopt(argc, argv, "p:h:")) != -1) {
-        switch (c) {
+    // handle provided options to the program using getopt
+    while ((opt = getopt(argc, argv, "p:h:")) != -1) {
+        switch (opt) {
             case 'p':
                 port = atoi(optarg);
                 break;
@@ -48,40 +45,104 @@ int main(int argc, char **argv) {
 
     printf("port = %d, host = %s\n", port, host);
 
-    // allows to get the list of folders to monitor
-    for (index = optind; index < argc; index++) {
-        printf("Non-option argument %s\n", argv[index]);
+    /*
+     * The following sections allows to process the folders paths provided in parameters.
+     * These paths are stored in a dynamic array in order to not limit the user to a specific number of folder to monitor.
+     * The length of the path string is also dynamic, to not restrict user too.
+     */
+
+    // folders size = total arg count - last processed arg by getopt
+    folders_size = argc - optind;
+    folders = (char**) malloc(folders_size * sizeof(char*));
+    if (folders == NULL) {
+        perror("folders malloc");
+        abort();
     }
+
+    // retrieve the list of folders to monitor
+    for (i = 0; i < folders_size; i++) {
+        // argv index is the index of the next folder path to process
+        // argv_index = last processed arg by getopt + i
+        argv_index = optind + i;
+        folders[i] = (char*) malloc(strlen(argv[argv_index]) * sizeof(char));
+        if (folders[i] == NULL) {
+            perror("folders[i] malloc");
+            abort();
+        }
+        strcpy(folders[i], argv[argv_index]);
+    }
+
+    monitor_folder(folders, folders_size);
+
+    // Free allocated memory
+    for (i = 0; i < folders_size; i++) {
+        free(folders[i]);
+    }
+    free(folders);
 
     return 0;
 }
 
-void monitor_folder() {
-    int length, i = 0;
+/*
+ * Allows to specify if we want to continue to monitor folders or not
+ */
+static volatile sig_atomic_t watch = 1;
+
+/**
+ * Allows to intercept sigint signal to stop watching folders properly
+ *
+ * @param _
+ */
+void sigint_interceptor(int _) {
+    watch = 0;
+    printf("\nSIGINT intercepted. Program will exit on next received event.\n");
+}
+
+/**
+ * Allows to monitor for newly created files in a list of specific folders
+ *
+ * @param folders - list of the folders to monitor
+ * @param folders_size - length of the folders list
+ */
+void monitor_folder(char** folders, int folders_size) {
+    int length, i;
     int file_descriptor;
-    int watch_descriptor;
+    int* watch_descriptor = NULL;
     char buffer[BUF_LEN];
 
+    // handle sigint signals
+    signal(SIGINT, sigint_interceptor);
+
     file_descriptor = inotify_init();
-
-    if (file_descriptor < 0) perror("inotify_init");
-
-    // /!\ number of inotify_add_watch calls are limited by value in /proc/sys/fs/inotify/max_user_watches
-    watch_descriptor = inotify_add_watch(file_descriptor, "../../monitored-folder-1",IN_CREATE);
-    length = read(file_descriptor, buffer, BUF_LEN);
-
-    if (length < 0) perror("read");
-
-    while (i < length) {
-        struct inotify_event *event = (struct inotify_event *) &buffer[i];
-        if (event->len) {
-            if (event->mask & IN_CREATE) {
-                printf("The file %s was created.\n", event->name);
-            }
-        }
-        i += EVENT_SIZE + event->len;
+    if (file_descriptor < 0) {
+        perror("inotify_init");
+        abort();
     }
 
-    (void) inotify_rm_watch(file_descriptor, watch_descriptor);
+    // todo : fix memory leak
+    watch_descriptor = (int*) malloc(folders_size * sizeof(int));
+    // number of inotify_add_watch calls are limited by value in /proc/sys/fs/inotify/max_user_watches
+    for (i = 0; i < folders_size; i++)
+        watch_descriptor[i] = inotify_add_watch(file_descriptor, folders[i] ,IN_CREATE);
+
+    while (watch) {
+        length = (int) read(file_descriptor, buffer, BUF_LEN);
+
+        if (length < 0) perror("read");
+
+        i = 0;
+        while (i < length) {
+            struct inotify_event *event = (struct inotify_event *) &buffer[i];
+            if (event->len) {
+                if (event->mask & IN_CREATE) {
+                    printf("The file %s was created.\n", event->name);
+                }
+            }
+            i += EVENT_SIZE + event->len;
+        }
+    }
+
+    for (i = 0; i < folders_size; i++)
+        (void) inotify_rm_watch(file_descriptor, watch_descriptor[i]);
     (void) close(file_descriptor);
 }
