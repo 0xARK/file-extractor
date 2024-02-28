@@ -119,13 +119,13 @@ void monitor_folder(char** folders, int folders_size) {
         abort();
     }
 
-    // todo : fix memory leak
     watch_descriptor = (int*) malloc(folders_size * sizeof(int));
     // number of inotify_add_watch calls are limited by value in /proc/sys/fs/inotify/max_user_watches
     for (i = 0; i < folders_size; i++)
         watch_descriptor[i] = inotify_add_watch(file_descriptor, folders[i] ,IN_CREATE);
 
     while (watch) {
+        // todo : maybe we can set read() in a thread, so when a signal is intercepted we can terminate the thread properly
         length = (int) read(file_descriptor, buffer, BUF_LEN);
 
         if (length < 0) perror("read");
@@ -145,4 +145,6 @@ void monitor_folder(char** folders, int folders_size) {
     for (i = 0; i < folders_size; i++)
         (void) inotify_rm_watch(file_descriptor, watch_descriptor[i]);
     (void) close(file_descriptor);
+
+    free(watch_descriptor);
 }
