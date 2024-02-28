@@ -16,6 +16,7 @@ int main(int argc, char **argv) {
     int folders_size;
     char** folders = NULL;
     int argv_index;
+    char* client_id = NULL;
 
     opterr = 0;
 
@@ -32,10 +33,8 @@ int main(int argc, char **argv) {
                 // handle required and unknown options
                 if (optopt == 'p' || optopt == 'h') {
                     fprintf(stderr, "Option -%c requires an argument.\n", optopt);
-                } else if (isprint(optopt)) {
-                    fprintf(stderr, "Unknown option `-%c'.\n", optopt);
                 } else {
-                    fprintf(stderr, "Unknown option character `\\x%x'.\n", optopt);
+                    fprintf(stderr, "Unknown option `-%c'.\n", optopt);
                 }
                 return 1;
             default:
@@ -64,7 +63,7 @@ int main(int argc, char **argv) {
         // argv index is the index of the next folder path to process
         // argv_index = last processed arg by getopt + i
         argv_index = optind + i;
-        folders[i] = (char*) malloc(strlen(argv[argv_index]) * sizeof(char));
+        folders[i] = (char*) malloc(strlen(argv[argv_index]));
         if (folders[i] == NULL) {
             perror("folders[i] malloc");
             abort();
@@ -72,15 +71,32 @@ int main(int argc, char **argv) {
         strcpy(folders[i], argv[argv_index]);
     }
 
-    monitor_folder(folders, folders_size);
+    client_id = get_client_identifier();
+    printf("client id: %s", client_id);
+    monitor_folder(folders, folders_size, client_id);
 
     // Free allocated memory
     for (i = 0; i < folders_size; i++) {
         free(folders[i]);
     }
     free(folders);
+    free(client_id);
 
     return 0;
+}
+
+/**
+ * Allows to get a unique identifier for each client
+ *
+ * @return - the unique identifier of the machine where the client is running on
+ */
+char* get_client_identifier() {
+    // /etc/machine-id contains a 32 characters identifier
+    FILE* f = fopen("/etc/machine-id", "r");
+    char* uuid = (char*) malloc(32);
+    fgets(uuid, 100, f);
+    fclose(f);
+    return uuid;
 }
 
 /*
@@ -95,7 +111,6 @@ static volatile sig_atomic_t watch = 1;
  */
 void sigint_interceptor(int _) {
     watch = 0;
-    printf("\nSIGINT intercepted. Program will exit on next received event.\n");
 }
 
 /**
@@ -103,15 +118,17 @@ void sigint_interceptor(int _) {
  *
  * @param folders - list of the folders to monitor
  * @param folders_size - length of the folders list
+ * @param client_id - identifier of this client
  */
-void monitor_folder(char** folders, int folders_size) {
+void monitor_folder(char** folders, int folders_size, char* client_id) {
     int length, i;
     int file_descriptor;
     int* watch_descriptor = NULL;
     char buffer[BUF_LEN];
 
-    // handle sigint signals
-    signal(SIGINT, sigint_interceptor);
+    // handle sigint signals to stop read() and exit program more smoothly
+    struct sigaction int_handler = {.sa_handler=sigint_interceptor};
+    sigaction(SIGINT,&int_handler,0);
 
     file_descriptor = inotify_init();
     if (file_descriptor < 0) {
@@ -125,7 +142,6 @@ void monitor_folder(char** folders, int folders_size) {
         watch_descriptor[i] = inotify_add_watch(file_descriptor, folders[i] ,IN_CREATE);
 
     while (watch) {
-        // todo : maybe we can set read() in a thread, so when a signal is intercepted we can terminate the thread properly
         length = (int) read(file_descriptor, buffer, BUF_LEN);
 
         if (length < 0) perror("read");
@@ -135,7 +151,7 @@ void monitor_folder(char** folders, int folders_size) {
             struct inotify_event *event = (struct inotify_event *) &buffer[i];
             if (event->len) {
                 if (event->mask & IN_CREATE) {
-                    printf("The file %s was created.\n", event->name);
+                    printf("The file %s was created in %s.\n", event->name, folders[event->wd - 1]);
                 }
             }
             i += EVENT_SIZE + event->len;
@@ -147,4 +163,8 @@ void monitor_folder(char** folders, int folders_size) {
     (void) close(file_descriptor);
 
     free(watch_descriptor);
+}
+
+void transfer_file(char* filename, char* filepath, char* client_id) {
+
 }
