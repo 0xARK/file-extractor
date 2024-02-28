@@ -1,4 +1,3 @@
-#include <signal.h>
 #include "server.h"
 
 struct Thread_params{
@@ -67,8 +66,8 @@ void start_server(int port, char* listener) {
     }
 
     struct sockaddr_in server;
-    server.sin_addr.s_addr = inet_addr(listener);
     server.sin_family = AF_INET;
+    server.sin_addr.s_addr = inet_addr(listener);
     server.sin_port = htons(port);
 
     bind_server = bind(sock_server, (const struct sockaddr *)&server, sizeof(server));
@@ -105,41 +104,56 @@ void start_server(int port, char* listener) {
     }
 
     close(sock_server);
-    printf("finished\n");
 }
 
 void* client_file_handle(void* args) {
     struct Thread_params* params = (struct Thread_params*) args;
     printf("Thread n° %d \n",params->id);
-    char filename[2000];
-    recv(params->client_socket, &filename, sizeof(filename), 0);
 
+    // receive client id length from client
+    uint16_t client_id_length;
+    recv(params->client_socket, &client_id_length, sizeof(client_id_length), 0);
+    // receive client id from client
+    char client_id[client_id_length + 1]; // add 1 for null byte
+    recv(params->client_socket, client_id, client_id_length + 1, 0); // add 1 for null byte
+
+    // get filename length from client
+    uint16_t filename_length;
+    recv(params->client_socket, &filename_length, sizeof(filename_length), 0);
+    // get filename from client
+    char filename[filename_length + 1]; // add 1 for null byte
+    recv(params->client_socket, &filename, filename_length + 1, 0); // add 1 for null byte
+
+    // get file length from client
     int length = 0;
-    read(params->client_socket, &length, sizeof(length));
+    recv(params->client_socket, &length, sizeof(length), 0);
 
-    char* filepath;
+    // build the filepath where we want to write the file content
+    // todo : change filepath with client id + check if folder exists
+    char* dest_path;
+    dest_path = malloc(strlen(filename) + sizeof("./reception/"));
+    strcpy(dest_path, "./reception/");
+    strcat(dest_path, filename);
+    printf("dest path: %s\n", dest_path);
 
-    filepath = malloc(strlen(filename) + sizeof("reception/"));
-    strcpy(filepath, "reception/");
-    strcat(filepath, filename);
-
-    FILE* f = fopen(filepath, "w");
-
-    char* data = malloc(length);
+    // get file content from client and write it on disk in a file
+    FILE* f = fopen(dest_path, "w");
+    char* file_data = malloc(length);
     int i = 0;
     while (i < length) {
-        recv(params->client_socket, &data[i], sizeof(data[i]), 0);
-        if (&data[i] == NULL)
+        recv(params->client_socket, &file_data[i], sizeof(file_data[i]), 0);
+        if (&file_data[i] == NULL)
             break;
-        fwrite(&data[i], 1, 1, f);
+        fwrite(&file_data[i], 1, 1, f);
         i++;
     }
 
     fclose(f);
     close(params->client_socket);
 
-    free(filepath);
-    free(data);
+    // free allocated memory
+    free(dest_path);
+    free(file_data);
 
     return NULL;
 }

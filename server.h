@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <pthread.h>
+#include <signal.h>
 
 #ifndef SERVER_SERVER_H
 #define SERVER_SERVER_H

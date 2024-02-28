@@ -74,8 +74,8 @@ int main(int argc, char** argv) {
     }
 
     client_id = get_client_identifier();
-    printf("client id: %s", client_id);
-    if (folders_size > 0) monitor_folder(folders, folders_size, client_id);
+    printf("client id: %s\n", client_id);
+    if (folders_size > 0) monitor_folder(folders, folders_size, client_id, port, host);
 
     // Free allocated memory
     for (i = 0; i < folders_size; i++) {
@@ -96,8 +96,9 @@ int main(int argc, char** argv) {
 char* get_client_identifier() {
     // /etc/machine-id contains a 32 characters identifier
     FILE* f = fopen("/etc/machine-id", "r");
-    char* uuid = (char*) malloc(32);
-    fgets(uuid, 100, f);
+    // add 1 to store '\0' byte
+    char* uuid = (char*) malloc(32 + 1);
+    fgets(uuid, 32 + 1, f);
     fclose(f);
     return uuid;
 }
@@ -121,7 +122,7 @@ void sigint_interceptor() {
  * @param folders_size - length of the folders list
  * @param client_id - identifier of this client
  */
-void monitor_folder(char** folders, int folders_size, char* client_id) {
+void monitor_folder(char** folders, int folders_size, char* client_id, int port, char* host) {
     int i;
     int length;
     int file_descriptor;
@@ -145,16 +146,17 @@ void monitor_folder(char** folders, int folders_size, char* client_id) {
 
     while (watch) {
         length = (int) read(file_descriptor, buffer, BUF_LEN);
-
-        // we don't want to exit : one read can fail, but we want to stay in the loop to wait for the next read
-        if (length < 0) perror("read");
+        if (length < 0) {
+            perror("read");
+            exit(1);
+        }
 
         i = 0;
         while (i < length) {
             struct inotify_event *event = (struct inotify_event *) &buffer[i];
             if (event->len) {
                 if (event->mask & IN_CREATE) {
-                    transfer_file(event->name, folders[event->wd -1], client_id);
+                    transfer_file(event->name, folders[event->wd -1], client_id, port, host);
                 }
             }
             i += EVENT_SIZE + event->len;
@@ -168,7 +170,78 @@ void monitor_folder(char** folders, int folders_size, char* client_id) {
     free(watch_descriptor);
 }
 
-void transfer_file(char* filename, char* filepath, char* client_id) {
-    printf("The file %s was created in %s on client %s\n", filename, filepath, client_id);
-    // todo
+void transfer_file(char* filename, char* filepath, char* client_id, int port, char* host) {
+    char* filename_with_path = NULL;
+    int malloc_size;
+    uint16_t is_path_good;
+    int sock;
+    int conn;
+    uint16_t filename_length;
+    uint16_t client_id_length;
+
+    printf("The file %s was created in %s.\n", filename, filepath);
+
+    // build the filepath of file to transfer with path + name
+    malloc_size = (int) (strlen(filename) + strlen(filepath) + 1); // add 1 for null byte
+    is_path_good = filepath[strlen(filepath) - 1] == '/';
+    if (!is_path_good) malloc_size++; // if path does not end with a /, increase malloc_size by 1 char
+    filename_with_path = (char*) malloc(malloc_size);
+    strcpy(filename_with_path, filepath);
+    if (!is_path_good) strcat(filename_with_path, "/"); // if path does not end with a /, concatenate it
+    strcat(filename_with_path, filename);
+
+    // create socket
+    sock = socket(AF_INET,SOCK_STREAM,0);
+    if (sock < 0) {
+        perror("sock");
+        exit(1);
+    }
+
+    // initialize server socket struct
+    struct sockaddr_in server;
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = inet_addr(host);
+    server.sin_port = htons(port);
+
+    conn = connect(sock,(const struct sockaddr *)&server,(socklen_t) sizeof(server));
+    if (conn < 0) {
+        perror("connection");
+        exit(1);
+    }
+
+    printf("Connected to server.\n");
+
+    // send client id length and client id to server
+    client_id_length = (uint16_t) strlen(client_id);
+    send(sock, &client_id_length, sizeof(client_id_length), 0);
+    send(sock, client_id, client_id_length + 1, 0); // add 1 for null byte
+
+    // send filename length and filename to server
+    filename_length = (uint16_t) strlen(filename);
+    send(sock, &filename_length, sizeof(filename_length), 0);
+    send(sock, filename, filename_length + 1, 0); // add 1 for null byte
+
+    // get file length
+    struct stat sb;
+    stat(filename_with_path, &sb);
+    off_t file_length = sb.st_size;
+
+    // send file length to server
+    int length_to_send = (int) file_length;
+    send(sock,&length_to_send,sizeof(length_to_send), 0);
+
+    printf("File to send is %s, with a length of %ld\n", filename_with_path, file_length - 1); // minus 1 for null byte
+
+    // send file content to server
+    FILE* f = fopen(filename_with_path, "r");
+    while(!feof(f)) {
+        char c = (char) fgetc(f);
+        send(sock,&c,sizeof(c),0);
+    }
+
+    fclose(f);
+    close(sock);
+
+    // free allocated memory
+    free(filename_with_path);
 }
