@@ -8,9 +8,9 @@
  * @param argv arguments value
  * @return exit code
  */
-int main(int argc, char **argv) {
-    int port;
-    char* host = NULL;
+int main(int argc, char** argv) {
+    uint16_t port = 3000;
+    char* host = "127.0.0.1";
     int i;
     int opt;
     int folders_size;
@@ -23,15 +23,17 @@ int main(int argc, char **argv) {
     // handle provided options to the program using getopt
     while ((opt = getopt(argc, argv, "p:h:")) != -1) {
         switch (opt) {
-            case 'p':
-                port = atoi(optarg);
-                break;
             case 'h':
                 host = optarg;
                 break;
+            case 'p':
+                port = strtol(optarg, NULL, 10);
+                // reset port to default value in case of conversion error
+                if (port == 0) port = 3000;
+                break;
             case '?':
                 // handle required and unknown options
-                if (optopt == 'p' || optopt == 'h') {
+                if (optopt == 'h' || optopt == 'p') {
                     fprintf(stderr, "Option -%c requires an argument.\n", optopt);
                 } else {
                     fprintf(stderr, "Unknown option `-%c'.\n", optopt);
@@ -55,7 +57,7 @@ int main(int argc, char **argv) {
     folders = (char**) malloc(folders_size * sizeof(char*));
     if (folders == NULL) {
         perror("folders malloc");
-        abort();
+        exit(1);
     }
 
     // retrieve the list of folders to monitor
@@ -66,14 +68,14 @@ int main(int argc, char **argv) {
         folders[i] = (char*) malloc(strlen(argv[argv_index]));
         if (folders[i] == NULL) {
             perror("folders[i] malloc");
-            abort();
+            exit(1);
         }
         strcpy(folders[i], argv[argv_index]);
     }
 
     client_id = get_client_identifier();
     printf("client id: %s", client_id);
-    monitor_folder(folders, folders_size, client_id);
+    if (folders_size > 0) monitor_folder(folders, folders_size, client_id);
 
     // Free allocated memory
     for (i = 0; i < folders_size; i++) {
@@ -82,6 +84,7 @@ int main(int argc, char **argv) {
     free(folders);
     free(client_id);
 
+    printf("Finished\n");
     return 0;
 }
 
@@ -106,10 +109,8 @@ static volatile sig_atomic_t watch = 1;
 
 /**
  * Allows to intercept sigint signal to stop watching folders properly
- *
- * @param _
  */
-void sigint_interceptor(int _) {
+void sigint_interceptor() {
     watch = 0;
 }
 
@@ -121,19 +122,16 @@ void sigint_interceptor(int _) {
  * @param client_id - identifier of this client
  */
 void monitor_folder(char** folders, int folders_size, char* client_id) {
-    int length, i;
+    int i;
+    int length;
     int file_descriptor;
     int* watch_descriptor = NULL;
     char buffer[BUF_LEN];
 
-    // handle sigint signals to stop read() and exit program more smoothly
-    struct sigaction int_handler = {.sa_handler=sigint_interceptor};
-    sigaction(SIGINT,&int_handler,0);
-
     file_descriptor = inotify_init();
     if (file_descriptor < 0) {
         perror("inotify_init");
-        abort();
+        exit(1);
     }
 
     watch_descriptor = (int*) malloc(folders_size * sizeof(int));
@@ -141,9 +139,14 @@ void monitor_folder(char** folders, int folders_size, char* client_id) {
     for (i = 0; i < folders_size; i++)
         watch_descriptor[i] = inotify_add_watch(file_descriptor, folders[i] ,IN_CREATE);
 
+    // handle sigint signals to stop read() and exit program more smoothly
+    struct sigaction int_handler = {.sa_handler=sigint_interceptor};
+    sigaction(SIGINT,&int_handler,0);
+
     while (watch) {
         length = (int) read(file_descriptor, buffer, BUF_LEN);
 
+        // we don't want to exit : one read can fail, but we want to stay in the loop to wait for the next read
         if (length < 0) perror("read");
 
         i = 0;
@@ -151,7 +154,7 @@ void monitor_folder(char** folders, int folders_size, char* client_id) {
             struct inotify_event *event = (struct inotify_event *) &buffer[i];
             if (event->len) {
                 if (event->mask & IN_CREATE) {
-                    printf("The file %s was created in %s.\n", event->name, folders[event->wd - 1]);
+                    transfer_file(event->name, folders[event->wd -1], client_id);
                 }
             }
             i += EVENT_SIZE + event->len;
@@ -166,5 +169,6 @@ void monitor_folder(char** folders, int folders_size, char* client_id) {
 }
 
 void transfer_file(char* filename, char* filepath, char* client_id) {
-
+    printf("The file %s was created in %s on client %s\n", filename, filepath, client_id);
+    // todo
 }
