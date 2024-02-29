@@ -4,10 +4,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/inotify.h>
-
-#include <sys/types.h>
 #include <sys/socket.h>
-#include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
 

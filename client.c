@@ -146,10 +146,6 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
 
     while (watch) {
         length = (int) read(file_descriptor, buffer, BUF_LEN);
-        if (length < 0) {
-            perror("read");
-            exit(1);
-        }
 
         i = 0;
         while (i < length) {

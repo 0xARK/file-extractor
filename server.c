@@ -1,10 +1,5 @@
 #include "server.h"
 
-struct Thread_params{
-    int client_socket;
-    int id;
-};
-
 int main(int argc, char** argv) {
     uint16_t port = 3000;
     char* listener = NULL;
@@ -56,77 +51,76 @@ void sigint_interceptor() {
 }
 
 void start_server(int port, char* listener) {
-    int sock_server;
-    int bind_server;
+    int passive_sock;
+    int bind_sock;
+    int connection_sock;
+    socklen_t addr_len;
 
-    sock_server = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_server < 0) {
+    passive_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (passive_sock < 0) {
         perror("socket");
         exit(1);
     }
 
-    struct sockaddr_in server;
-    server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr(listener);
-    server.sin_port = htons(port);
+    struct sockaddr_in server_addr, client_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = inet_addr(listener);
+    server_addr.sin_port = htons(port);
 
-    bind_server = bind(sock_server, (const struct sockaddr *)&server, sizeof(server));
-    if (bind_server < 0) {
+    bind_sock = bind(passive_sock, (const struct sockaddr *)&server_addr, sizeof(server_addr));
+    if (bind_sock < 0) {
         perror("bind");
         exit(1);
     }
 
-    // listen for up to 10 connections
-    if (listen(sock_server, 10) == 0) {
-        printf("Listening...\n");
+    // up to 1024 pending request queue
+    if (listen(passive_sock, 1024) < 0) {
+        perror("listen");
+        exit(1);
     }
-
-    struct sockaddr_in client[10];
-    socklen_t addr_len = sizeof(*client);
-
-    int i = 0;
-    int client_sock[10];
-    pthread_t Thread[10];
+    printf("Listening...\n");
 
     // handle sigint signals to stop accept() and exit program more smoothly
     struct sigaction int_handler = {.sa_handler=sigint_interceptor};
     sigaction(SIGINT,&int_handler,0);
 
     while (listening) {
-        client_sock[i] = accept(sock_server, (struct sockaddr *)&client[i], &addr_len);
-        struct Thread_params param;
-        param.client_socket=client_sock[i];
-        param.id=i;
-        pthread_create(&Thread[i],NULL,client_file_handle,&param);
-        pthread_join(Thread[i],NULL);
+        addr_len = sizeof(struct sockaddr_in);
+        connection_sock = accept(passive_sock, (struct sockaddr *)&client_addr, &addr_len);
 
-        i++;
+        if (connection_sock == -1) {
+            perror("accept failed");
+        } else {
+            if (fork() == 0) {
+                close(passive_sock);
+                client_file_handle(connection_sock);
+                exit(0);
+            }
+        }
     }
 
-    close(sock_server);
+    close(connection_sock);
+
 }
 
-void* client_file_handle(void* args) {
-    struct Thread_params* params = (struct Thread_params*) args;
-    printf("Thread n° %d \n",params->id);
-
+void client_file_handle(int client_socket) {
     // receive client id length from client
     uint16_t client_id_length;
-    recv(params->client_socket, &client_id_length, sizeof(client_id_length), 0);
+    recv(client_socket, &client_id_length, sizeof(client_id_length), 0);
     // receive client id from client
     char client_id[client_id_length + 1]; // add 1 for null byte
-    recv(params->client_socket, client_id, client_id_length + 1, 0); // add 1 for null byte
+    recv(client_socket, client_id, client_id_length + 1, 0); // add 1 for null byte
 
     // get filename length from client
     uint16_t filename_length;
-    recv(params->client_socket, &filename_length, sizeof(filename_length), 0);
+    recv(client_socket, &filename_length, sizeof(filename_length), 0);
     // get filename from client
     char filename[filename_length + 1]; // add 1 for null byte
-    recv(params->client_socket, &filename, filename_length + 1, 0); // add 1 for null byte
+    recv(client_socket, &filename, filename_length + 1, 0); // add 1 for null byte
 
     // get file length from client
     int length = 0;
-    recv(params->client_socket, &length, sizeof(length), 0);
+    recv(client_socket, &length, sizeof(length), 0);
 
     // build the filepath where we want to write the file content
     // todo : change filepath with client id + check if folder exists
@@ -141,7 +135,7 @@ void* client_file_handle(void* args) {
     char* file_data = malloc(length);
     int i = 0;
     while (i < length) {
-        recv(params->client_socket, &file_data[i], sizeof(file_data[i]), 0);
+        recv(client_socket, &file_data[i], sizeof(file_data[i]), 0);
         if (&file_data[i] == NULL)
             break;
         fwrite(&file_data[i], 1, 1, f);
@@ -149,11 +143,8 @@ void* client_file_handle(void* args) {
     }
 
     fclose(f);
-    close(params->client_socket);
 
     // free allocated memory
     free(dest_path);
     free(file_data);
-
-    return NULL;
 }
