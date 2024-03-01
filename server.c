@@ -147,6 +147,19 @@ void start_server(int port, char* listener) {
     close(connection_sock);
 }
 
+char* get_file_path(char* file_name, char* client_id) {
+    // build the filepath where we want to write the file content
+    // todo : change filepath with client id + check if folder exists
+    char* file_path;
+
+    file_path = malloc(strlen(file_name) + sizeof("./reception/"));
+    strcpy(file_path, "./reception/");
+    strcat(file_path, file_name);
+    printf("dest path: %s\n", file_path);
+
+    return file_path;
+}
+
 void client_file_handle(int client_socket) {
     // receive client id length from client
     uint16_t client_id_length;
@@ -166,13 +179,7 @@ void client_file_handle(int client_socket) {
     int length = 0;
     recv(client_socket, &length, sizeof(length), 0);
 
-    // build the filepath where we want to write the file content
-    // todo : change filepath with client id + check if folder exists
-    char* file_path;
-    file_path = malloc(strlen(file_name) + sizeof("./reception/"));
-    strcpy(file_path, "./reception/");
-    strcat(file_path, file_name);
-    printf("dest path: %s\n", file_path);
+    char* file_path = get_file_path(file_name, client_id);
 
     // get file content from client and write it on disk in a file
     FILE* f = fopen(file_path, "w");

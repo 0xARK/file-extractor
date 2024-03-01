@@ -15,9 +15,11 @@
 #define BUF_LEN         (1024 * (EVENT_SIZE + 16))
 
 void monitor_folder(char **folders, int folders_size, char* client_id, int port, char* host);
-char* get_client_identifier();
-int create_socket(int port, char* host);
-char* get_file_path(char* file_name, char* folder_path);
 void transfer_file(char* filename, char* filepath, char* client_id, int port, char* host);
+
+int create_socket(int port, char* host);
+
+char* get_client_identifier();
+char* get_file_path(char* file_name, char* folder_path);
 
 #endif //SERVER_CLIENT_H
