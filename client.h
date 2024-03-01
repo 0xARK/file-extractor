@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
+#include <openssl/ssl.h>
 
 #ifndef SERVER_CLIENT_H
 #define SERVER_CLIENT_H
@@ -21,5 +22,7 @@ int create_socket(int port, char* host);
 
 char* get_client_identifier();
 char* get_file_path(char* file_name, char* folder_path);
+
+SSL_CTX* create_context();
 
 #endif //SERVER_CLIENT_H

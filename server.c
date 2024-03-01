@@ -32,6 +32,7 @@ int main(int argc, char** argv) {
     }
 
     printf("port = %d, listen = %s\n", port, listener);
+
     start_server(port, listener);
 
     printf("Finished\n");
@@ -39,14 +40,14 @@ int main(int argc, char** argv) {
 }
 
 SSL_CTX* create_context() {
-    const SSL_METHOD *method;
+    const SSL_METHOD* method;
     SSL_CTX* ctx;
 
     method = TLS_server_method();
 
     ctx = SSL_CTX_new(method);
     if (!ctx) {
-        perror("Unable to create SSL context");
+        perror("Unable to create SSL context\n");
         exit(EXIT_FAILURE);
     }
 
@@ -56,12 +57,17 @@ SSL_CTX* create_context() {
 void configure_context(SSL_CTX *ctx) {
     // set the key and certificate
     if (SSL_CTX_use_certificate_file(ctx, "cert.pem", SSL_FILETYPE_PEM) <= 0) {
-        perror("Can not use certificate file");
+        perror("Can not use certificate file\n");
         exit(EXIT_FAILURE);
     }
 
     if (SSL_CTX_use_PrivateKey_file(ctx, "key.pem", SSL_FILETYPE_PEM) <= 0 ) {
-        perror("Can not use private key file");
+        perror("Can not use private key file\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (!SSL_CTX_check_private_key(ctx)) {
+        perror("Private key and public certificate doesn't match\n");
         exit(EXIT_FAILURE);
     }
 }
@@ -84,7 +90,7 @@ int create_socket(int port, char* listener) {
 
     passive_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (passive_sock < 0) {
-        perror("Unable to create socket");
+        perror("Unable to create socket\n");
         exit(EXIT_FAILURE);
     }
 
@@ -94,13 +100,13 @@ int create_socket(int port, char* listener) {
 
     bind_sock = bind(passive_sock, (const struct sockaddr *)&server_addr, sizeof(server_addr));
     if (bind_sock < 0) {
-        perror("Unable to bind socket");
+        perror("Unable to bind socket\n");
         exit(EXIT_FAILURE);
     }
 
     // up to 1024 pending request queue
     if (listen(passive_sock, 1024) < 0) {
-        perror("Unable to listen socket");
+        perror("Unable to listen socket\n");
         exit(EXIT_FAILURE);
     }
     printf("Listening...\n");
@@ -109,8 +115,7 @@ int create_socket(int port, char* listener) {
 }
 
 void start_server(int port, char* listener) {
-    int passive_sock;
-    int connection_sock;
+    int server_sock, client_sock;
     socklen_t addr_len;
     SSL_CTX* ctx;
     struct sockaddr_in client_addr;
@@ -119,10 +124,10 @@ void start_server(int port, char* listener) {
     struct sigaction pipe_handler = {.sa_handler=SIG_IGN};
     sigaction(SIGPIPE, &pipe_handler, 0);
 
-    // ctx = create_context();
-    // configure_context(ctx);
+    ctx = create_context();
+    configure_context(ctx);
 
-    passive_sock = create_socket(port, listener);
+    server_sock = create_socket(port, listener);
 
     // handle sigint signals to stop accept() and exit program more smoothly
     struct sigaction int_handler = {.sa_handler=int_modifier};
@@ -130,54 +135,79 @@ void start_server(int port, char* listener) {
 
     while (listening) {
         addr_len = sizeof(struct sockaddr_in);
-        connection_sock = accept(passive_sock, (struct sockaddr *)&client_addr, &addr_len);
+        SSL* ssl;
+        client_sock = accept(server_sock, (struct sockaddr *)&client_addr, &addr_len);
 
-        if (connection_sock == -1) {
+        ssl = SSL_new(ctx);
+        SSL_set_fd(ssl, client_sock);
+
+        if (SSL_accept(ssl) <= 0) {
             // don't exit in order to quit program smoothly in case of SIGINT handling
             perror("Accept connection failed");
+            close(client_sock);
+            SSL_shutdown(ssl);
+            SSL_free(ssl);
+            SSL_CTX_free(ctx);
         } else {
             if (fork() == 0) {
-                close(passive_sock);
-                client_file_handle(connection_sock);
-                exit(0);
+                client_file_handle(ssl);
+                SSL_shutdown(ssl);
+                SSL_free(ssl);
+                SSL_CTX_free(ctx);
+                close(client_sock);
+                exit(EXIT_SUCCESS);
             }
         }
     }
 
-    close(connection_sock);
+    close(server_sock);
 }
 
 char* get_file_path(char* file_name, char* client_id) {
-    // build the filepath where we want to write the file content
-    // todo : change filepath with client id + check if folder exists
+    char* dest_path = "./client-files/";
+    char* folder_path;
     char* file_path;
+    struct stat st = {0};
 
-    file_path = malloc(strlen(file_name) + sizeof("./reception/"));
-    strcpy(file_path, "./reception/");
+    // create client folder if it doesn't exist
+    folder_path = (char*) malloc(strlen(dest_path) + strlen(client_id) + 1); // add 1 for null byte
+    strcpy(folder_path, dest_path);
+    strcat(folder_path, client_id);
+    if (stat(folder_path, &st) == -1) {
+        printf("Client folder %s does not exist, creating it\n", folder_path);
+        mkdir(folder_path, 0644);
+    }
+    free(folder_path);
+
+    // build the filepath where we want to write the file content
+    file_path = (char*) malloc(strlen(dest_path) + strlen(client_id) + strlen(file_name) + 1 + 1); // add 1 for / and 1 for null byte
+    strcpy(file_path, dest_path);
+    strcat(file_path, client_id);
+    strcat(file_path, "/");
     strcat(file_path, file_name);
     printf("dest path: %s\n", file_path);
 
     return file_path;
 }
 
-void client_file_handle(int client_socket) {
+void client_file_handle(SSL* ssl) {
     // receive client id length from client
     uint16_t client_id_length;
-    recv(client_socket, &client_id_length, sizeof(client_id_length), 0);
+    SSL_read(ssl, &client_id_length, sizeof(client_id_length));
     // receive client id from client
     char client_id[client_id_length + 1]; // add 1 for null byte
-    recv(client_socket, client_id, client_id_length + 1, 0); // add 1 for null byte
+    SSL_read(ssl, client_id, client_id_length + 1); // add 1 for null byte
 
     // get filename length from client
     uint16_t file_name_length;
-    recv(client_socket, &file_name_length, sizeof(file_name_length), 0);
+    SSL_read(ssl, &file_name_length, sizeof(file_name_length));
     // get filename from client
     char file_name[file_name_length + 1]; // add 1 for null byte
-    recv(client_socket, &file_name, file_name_length + 1, 0); // add 1 for null byte
+    SSL_read(ssl, &file_name, file_name_length + 1); // add 1 for null byte
 
     // get file length from client
     int length = 0;
-    recv(client_socket, &length, sizeof(length), 0);
+    SSL_read(ssl, &length, sizeof(length));
 
     char* file_path = get_file_path(file_name, client_id);
 
@@ -186,9 +216,8 @@ void client_file_handle(int client_socket) {
     char* file_data = malloc(length);
     int i = 0;
     while (i < length) {
-        recv(client_socket, &file_data[i], sizeof(file_data[i]), 0);
-        if (&file_data[i] == NULL)
-            break;
+        SSL_read(ssl, &file_data[i], sizeof(file_data[i]));
+        if (&file_data[i] == NULL) break;
         fwrite(&file_data[i], 1, 1, f);
         i++;
     }

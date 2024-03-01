@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
     folders_size = argc - optind;
     folders = (char**) malloc(folders_size * sizeof(char*));
     if (folders == NULL) {
-        perror("Memory allocation for folders failed");
+        perror("Memory allocation for folders failed\n");
         exit(EXIT_FAILURE);
     }
 
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
         argv_index = optind + i;
         folders[i] = (char*) malloc(strlen(argv[argv_index]));
         if (folders[i] == NULL) {
-            perror("Memory allocation for folders[i] failed");
+            perror("Memory allocation for folders[i] failed\n");
             exit(EXIT_FAILURE);
         }
         strcpy(folders[i], argv[argv_index]);
@@ -103,6 +103,21 @@ char* get_client_identifier() {
     return uuid;
 }
 
+SSL_CTX* create_context() {
+    const SSL_METHOD* method;
+    SSL_CTX* ctx;
+
+    method = TLS_client_method();
+
+    ctx = SSL_CTX_new(method);
+    if (!ctx) {
+        perror("Unable to create SSL context\n");
+        exit(EXIT_FAILURE);
+    }
+
+    return ctx;
+}
+
 /*
  * Allows to specify if we want to continue to monitor folders or not
  */
@@ -131,7 +146,7 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
 
     file_descriptor = inotify_init();
     if (file_descriptor < 0) {
-        perror("Inotify init failed");
+        perror("Inotify init failed\n");
         exit(EXIT_FAILURE);
     }
 
@@ -173,7 +188,7 @@ int create_socket(int port, char* host) {
     // create socket
     sock = socket(AF_INET,SOCK_STREAM,0);
     if (sock < 0) {
-        perror("Unable to create socket");
+        perror("Unable to create socket\n");
         exit(EXIT_FAILURE);
     }
 
@@ -185,7 +200,7 @@ int create_socket(int port, char* host) {
 
     conn = connect(sock,(const struct sockaddr *)&server,(socklen_t) sizeof(server));
     if (conn < 0) {
-        perror("Connection to server failed");
+        perror("Connection to server failed\n");
         exit(EXIT_FAILURE);
     }
 
@@ -199,7 +214,9 @@ char* get_file_path(char* file_name, char* folder_path) {
     int malloc_size;
     uint16_t is_path_good;
 
-    printf("The file %s was created in %s.\n", file_name, folder_path);
+
+
+    printf("The file %s was created in %s\n", file_name, folder_path);
 
     // build the filepath of file to transfer with path + name
     malloc_size = (int) (strlen(file_name) + strlen(folder_path) + 1); // add 1 for null byte
@@ -214,23 +231,34 @@ char* get_file_path(char* file_name, char* folder_path) {
 }
 
 void transfer_file(char* file_name, char* folder_path, char* client_id, int port, char* host) {
+    SSL_CTX* ctx;
     char* file_path = NULL;
     int sock;
+    SSL* ssl;
     uint16_t filename_length;
     uint16_t client_id_length;
 
+    ctx = create_context();
     file_path = get_file_path(file_name, folder_path);
     sock = create_socket(port, host);
+    ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, sock);
+    if (SSL_connect(ssl) <= 0) {
+        perror("SSL connection failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Connected with %s encryption\n", SSL_get_cipher(ssl));
 
     // send client id length and client id to server
     client_id_length = (uint16_t) strlen(client_id);
-    send(sock, &client_id_length, sizeof(client_id_length), 0);
-    send(sock, client_id, client_id_length + 1, 0); // add 1 for null byte
+    SSL_write(ssl, &client_id_length, sizeof(client_id_length));
+    SSL_write(ssl, client_id, client_id_length + 1); // add 1 for null byte
 
     // send filename length and filename to server
     filename_length = (uint16_t) strlen(file_name);
-    send(sock, &filename_length, sizeof(filename_length), 0);
-    send(sock, file_name, filename_length + 1, 0); // add 1 for null byte
+    SSL_write(ssl, &filename_length, sizeof(filename_length));
+    SSL_write(ssl, file_name, filename_length + 1); // add 1 for null byte
 
     // get file length
     struct stat sb;
@@ -239,7 +267,7 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
 
     // send file length to server
     int length_to_send = (int) file_length;
-    send(sock,&length_to_send,sizeof(length_to_send), 0);
+    SSL_write(ssl,&length_to_send,sizeof(length_to_send));
 
     // minus 1 for null byte if length > 0
     printf("File to send is %s, with a length of %ld\n", file_path, file_length > 0 ? file_length - 1 : 0);
@@ -248,12 +276,15 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     FILE* f = fopen(file_path, "r");
     while(!feof(f)) {
         char c = (char) fgetc(f);
-        send(sock,&c,sizeof(c),0);
+        SSL_write(ssl, &c, sizeof(c));
     }
 
     fclose(f);
     close(sock);
+    SSL_shutdown(ssl);
 
     // free allocated memory
     free(file_path);
+    SSL_free(ssl);
+    SSL_CTX_free(ctx);
 }

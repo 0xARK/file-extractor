@@ -6,13 +6,14 @@
 #include <string.h>
 #include <signal.h>
 #include <openssl/ssl.h>
+#include <sys/stat.h>
 
 #ifndef SERVER_SERVER_H
 #define SERVER_SERVER_H
 
 void configure_context(SSL_CTX *ctx);
 void start_server(int port, char* listener);
-void client_file_handle(int client_socket);
+void client_file_handle(SSL* ssl);
 
 int create_socket(int port, char* listener);
 
