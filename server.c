@@ -38,50 +38,94 @@ int main(int argc, char** argv) {
     return 0;
 }
 
+SSL_CTX* create_context() {
+    const SSL_METHOD *method;
+    SSL_CTX* ctx;
+
+    method = TLS_server_method();
+
+    ctx = SSL_CTX_new(method);
+    if (!ctx) {
+        perror("Unable to create SSL context");
+        exit(EXIT_FAILURE);
+    }
+
+    return ctx;
+}
+
+void configure_context(SSL_CTX *ctx) {
+    // set the key and certificate
+    if (SSL_CTX_use_certificate_file(ctx, "cert.pem", SSL_FILETYPE_PEM) <= 0) {
+        perror("Can not use certificate file");
+        exit(EXIT_FAILURE);
+    }
+
+    if (SSL_CTX_use_PrivateKey_file(ctx, "key.pem", SSL_FILETYPE_PEM) <= 0 ) {
+        perror("Can not use private key file");
+        exit(EXIT_FAILURE);
+    }
+}
+
 /*
  * Allows to specify if we want to continue to monitor folders or not
  */
 static volatile sig_atomic_t listening = 1;
 
 /**
- * Allows to intercept sigint signal to stop watching folders properly
+ * Allows to intercept sigint signal to stop listening for client properly
  */
-void sigint_interceptor() {
+void int_modifier() {
     listening = 0;
 }
 
-void start_server(int port, char* listener) {
-    int passive_sock;
-    int bind_sock;
-    int connection_sock;
-    socklen_t addr_len;
+int create_socket(int port, char* listener) {
+    int passive_sock, bind_sock;
+    struct sockaddr_in server_addr;
 
     passive_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (passive_sock < 0) {
-        perror("socket");
-        exit(1);
+        perror("Unable to create socket");
+        exit(EXIT_FAILURE);
     }
 
-    struct sockaddr_in server_addr, client_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = inet_addr(listener);
     server_addr.sin_port = htons(port);
 
     bind_sock = bind(passive_sock, (const struct sockaddr *)&server_addr, sizeof(server_addr));
     if (bind_sock < 0) {
-        perror("bind");
-        exit(1);
+        perror("Unable to bind socket");
+        exit(EXIT_FAILURE);
     }
 
     // up to 1024 pending request queue
     if (listen(passive_sock, 1024) < 0) {
-        perror("listen");
-        exit(1);
+        perror("Unable to listen socket");
+        exit(EXIT_FAILURE);
     }
     printf("Listening...\n");
 
+    return passive_sock;
+}
+
+void start_server(int port, char* listener) {
+    int passive_sock;
+    int connection_sock;
+    socklen_t addr_len;
+    SSL_CTX* ctx;
+    struct sockaddr_in client_addr;
+
+    // ignore broken pipe signals
+    struct sigaction pipe_handler = {.sa_handler=SIG_IGN};
+    sigaction(SIGPIPE, &pipe_handler, 0);
+
+    // ctx = create_context();
+    // configure_context(ctx);
+
+    passive_sock = create_socket(port, listener);
+
     // handle sigint signals to stop accept() and exit program more smoothly
-    struct sigaction int_handler = {.sa_handler=sigint_interceptor};
+    struct sigaction int_handler = {.sa_handler=int_modifier};
     sigaction(SIGINT,&int_handler,0);
 
     while (listening) {
@@ -89,7 +133,8 @@ void start_server(int port, char* listener) {
         connection_sock = accept(passive_sock, (struct sockaddr *)&client_addr, &addr_len);
 
         if (connection_sock == -1) {
-            perror("accept failed");
+            // don't exit in order to quit program smoothly in case of SIGINT handling
+            perror("Accept connection failed");
         } else {
             if (fork() == 0) {
                 close(passive_sock);
@@ -100,7 +145,6 @@ void start_server(int port, char* listener) {
     }
 
     close(connection_sock);
-
 }
 
 void client_file_handle(int client_socket) {
@@ -112,11 +156,11 @@ void client_file_handle(int client_socket) {
     recv(client_socket, client_id, client_id_length + 1, 0); // add 1 for null byte
 
     // get filename length from client
-    uint16_t filename_length;
-    recv(client_socket, &filename_length, sizeof(filename_length), 0);
+    uint16_t file_name_length;
+    recv(client_socket, &file_name_length, sizeof(file_name_length), 0);
     // get filename from client
-    char filename[filename_length + 1]; // add 1 for null byte
-    recv(client_socket, &filename, filename_length + 1, 0); // add 1 for null byte
+    char file_name[file_name_length + 1]; // add 1 for null byte
+    recv(client_socket, &file_name, file_name_length + 1, 0); // add 1 for null byte
 
     // get file length from client
     int length = 0;
@@ -124,14 +168,14 @@ void client_file_handle(int client_socket) {
 
     // build the filepath where we want to write the file content
     // todo : change filepath with client id + check if folder exists
-    char* dest_path;
-    dest_path = malloc(strlen(filename) + sizeof("./reception/"));
-    strcpy(dest_path, "./reception/");
-    strcat(dest_path, filename);
-    printf("dest path: %s\n", dest_path);
+    char* file_path;
+    file_path = malloc(strlen(file_name) + sizeof("./reception/"));
+    strcpy(file_path, "./reception/");
+    strcat(file_path, file_name);
+    printf("dest path: %s\n", file_path);
 
     // get file content from client and write it on disk in a file
-    FILE* f = fopen(dest_path, "w");
+    FILE* f = fopen(file_path, "w");
     char* file_data = malloc(length);
     int i = 0;
     while (i < length) {
@@ -145,6 +189,6 @@ void client_file_handle(int client_socket) {
     fclose(f);
 
     // free allocated memory
-    free(dest_path);
+    free(file_path);
     free(file_data);
 }

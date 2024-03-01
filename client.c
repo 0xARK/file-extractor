@@ -56,8 +56,8 @@ int main(int argc, char** argv) {
     folders_size = argc - optind;
     folders = (char**) malloc(folders_size * sizeof(char*));
     if (folders == NULL) {
-        perror("folders malloc");
-        exit(1);
+        perror("Memory allocation for folders failed");
+        exit(EXIT_FAILURE);
     }
 
     // retrieve the list of folders to monitor
@@ -67,8 +67,8 @@ int main(int argc, char** argv) {
         argv_index = optind + i;
         folders[i] = (char*) malloc(strlen(argv[argv_index]));
         if (folders[i] == NULL) {
-            perror("folders[i] malloc");
-            exit(1);
+            perror("Memory allocation for folders[i] failed");
+            exit(EXIT_FAILURE);
         }
         strcpy(folders[i], argv[argv_index]);
     }
@@ -111,7 +111,7 @@ static volatile sig_atomic_t watch = 1;
 /**
  * Allows to intercept sigint signal to stop watching folders properly
  */
-void sigint_interceptor() {
+void int_modifier() {
     watch = 0;
 }
 
@@ -131,8 +131,8 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
 
     file_descriptor = inotify_init();
     if (file_descriptor < 0) {
-        perror("inotify_init");
-        exit(1);
+        perror("Inotify init failed");
+        exit(EXIT_FAILURE);
     }
 
     watch_descriptor = (int*) malloc(folders_size * sizeof(int));
@@ -141,7 +141,7 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
         watch_descriptor[i] = inotify_add_watch(file_descriptor, folders[i] ,IN_CREATE);
 
     // handle sigint signals to stop read() and exit program more smoothly
-    struct sigaction int_handler = {.sa_handler=sigint_interceptor};
+    struct sigaction int_handler = {.sa_handler=int_modifier};
     sigaction(SIGINT,&int_handler,0);
 
     while (watch) {
@@ -166,31 +166,15 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
     free(watch_descriptor);
 }
 
-void transfer_file(char* filename, char* filepath, char* client_id, int port, char* host) {
-    char* filename_with_path = NULL;
-    int malloc_size;
-    uint16_t is_path_good;
+int create_socket(int port, char* host) {
     int sock;
     int conn;
-    uint16_t filename_length;
-    uint16_t client_id_length;
-
-    printf("The file %s was created in %s.\n", filename, filepath);
-
-    // build the filepath of file to transfer with path + name
-    malloc_size = (int) (strlen(filename) + strlen(filepath) + 1); // add 1 for null byte
-    is_path_good = filepath[strlen(filepath) - 1] == '/';
-    if (!is_path_good) malloc_size++; // if path does not end with a /, increase malloc_size by 1 char
-    filename_with_path = (char*) malloc(malloc_size);
-    strcpy(filename_with_path, filepath);
-    if (!is_path_good) strcat(filename_with_path, "/"); // if path does not end with a /, concatenate it
-    strcat(filename_with_path, filename);
 
     // create socket
     sock = socket(AF_INET,SOCK_STREAM,0);
     if (sock < 0) {
-        perror("sock");
-        exit(1);
+        perror("Unable to create socket");
+        exit(EXIT_FAILURE);
     }
 
     // initialize server socket struct
@@ -201,11 +185,42 @@ void transfer_file(char* filename, char* filepath, char* client_id, int port, ch
 
     conn = connect(sock,(const struct sockaddr *)&server,(socklen_t) sizeof(server));
     if (conn < 0) {
-        perror("connection");
-        exit(1);
+        perror("Connection to server failed");
+        exit(EXIT_FAILURE);
     }
 
     printf("Connected to server.\n");
+
+    return sock;
+}
+
+char* get_file_path(char* file_name, char* folder_path) {
+    char* file_path = NULL;
+    int malloc_size;
+    uint16_t is_path_good;
+
+    printf("The file %s was created in %s.\n", file_name, folder_path);
+
+    // build the filepath of file to transfer with path + name
+    malloc_size = (int) (strlen(file_name) + strlen(folder_path) + 1); // add 1 for null byte
+    is_path_good = folder_path[strlen(folder_path) - 1] == '/';
+    if (!is_path_good) malloc_size++; // if path does not end with a /, increase malloc_size by 1 char
+    file_path = (char*) malloc(malloc_size);
+    strcpy(file_path, folder_path);
+    if (!is_path_good) strcat(file_path, "/"); // if path does not end with a /, concatenate it
+    strcat(file_path, file_name);
+
+    return file_path;
+}
+
+void transfer_file(char* file_name, char* folder_path, char* client_id, int port, char* host) {
+    char* file_path = NULL;
+    int sock;
+    uint16_t filename_length;
+    uint16_t client_id_length;
+
+    file_path = get_file_path(file_name, folder_path);
+    sock = create_socket(port, host);
 
     // send client id length and client id to server
     client_id_length = (uint16_t) strlen(client_id);
@@ -213,23 +228,24 @@ void transfer_file(char* filename, char* filepath, char* client_id, int port, ch
     send(sock, client_id, client_id_length + 1, 0); // add 1 for null byte
 
     // send filename length and filename to server
-    filename_length = (uint16_t) strlen(filename);
+    filename_length = (uint16_t) strlen(file_name);
     send(sock, &filename_length, sizeof(filename_length), 0);
-    send(sock, filename, filename_length + 1, 0); // add 1 for null byte
+    send(sock, file_name, filename_length + 1, 0); // add 1 for null byte
 
     // get file length
     struct stat sb;
-    stat(filename_with_path, &sb);
+    stat(file_path, &sb);
     off_t file_length = sb.st_size;
 
     // send file length to server
     int length_to_send = (int) file_length;
     send(sock,&length_to_send,sizeof(length_to_send), 0);
 
-    printf("File to send is %s, with a length of %ld\n", filename_with_path, file_length - 1); // minus 1 for null byte
+    // minus 1 for null byte if length > 0
+    printf("File to send is %s, with a length of %ld\n", file_path, file_length > 0 ? file_length - 1 : 0);
 
     // send file content to server
-    FILE* f = fopen(filename_with_path, "r");
+    FILE* f = fopen(file_path, "r");
     while(!feof(f)) {
         char c = (char) fgetc(f);
         send(sock,&c,sizeof(c),0);
@@ -239,5 +255,5 @@ void transfer_file(char* filename, char* filepath, char* client_id, int port, ch
     close(sock);
 
     // free allocated memory
-    free(filename_with_path);
+    free(file_path);
 }
