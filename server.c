@@ -175,7 +175,7 @@ char* get_file_path(char* file_name, char* client_id) {
     strcat(folder_path, client_id);
     if (stat(folder_path, &st) == -1) {
         printf("Client folder %s does not exist, creating it\n", folder_path);
-        mkdir(folder_path, 0644);
+        mkdir(folder_path, 0744);
     }
     free(folder_path);
 
