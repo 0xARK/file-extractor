@@ -47,7 +47,7 @@ La seconde problématique a été la sécurisation de la connexion afin d'assure
 
 Enfin, la dernière problématique rencontrée a été l'intégration d'un système de vérification d'intégrité. Je sais que la pile TCP/IP inclu déjà un système de vérification d'intégrité des paquets basé sur l'algorithme CRC, cependant j'ai pensé que ce ne serait pas suffisant. J'avoue ne pas avoir trop bloqué sur cette problématique : j'ai simplement généré un checksum du fichier avant de l'envoyer, que j'ai ensuite transmis au serveur afin que celui-ci puisse vérifier l'intégrité du fichier tout juste écrit.
 
-Concernant la gestion concurrente des clients côté serveur, j'ai simplement utilisé l'appel système fork() permettant de créer un processus enfant, dans lesquels les traitements de chaque client sont effectués afin de ne pas bloquer les requêtes suivantes.
+Concernant la gestion concurrente des clients côté serveur, j'ai utilisé l'appel système fork() permettant de créer un processus enfant, dans lesquels les traitements de chaque client sont effectués afin de ne pas bloquer les requêtes suivantes.
 
 Je souhaitais également mettre la lumière sur la terminaison des programmes client et serveur : étant donné que cela n'était pas précisé dans les consignes, je suis parti du principe que ceux-ci seraient lancés manuellement. C'est pour cela que pour les arrêter correctement en fermant les sockets et en libérant la mémoire utilisée, j'ai choisi d'intercepter le signal sigint (CTRL+C) afin de procéder à ces actions. Bien entendu, cela peut ne pas correspondre à l'usage voulu dans certains cas, par exemple si le programme est lancé par un autre processus. Il faudrait alors retravailler la manière dont nous souhaitons interrompre notre programme proprement.
 
