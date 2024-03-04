@@ -13,7 +13,7 @@ openssl req -newkey rsa:2048 -new -nodes -x509 -days 3650 -keyout key.pem -out c
 
 ## Notes
 
-Je vous propose ici une courte explication de ce que j'ai mis en place afin de respecter les consignes
+Je vous propose ici une courte explication de ce que j'ai mis en place afin de respecter les consignes.
 
 La première véritable problématique rencontrée a été l'identification unique des clients. Il existe plusieurs moyens d'identifier une machine de manière unique, comme par exemple l'adresse MAC, la génération d'un UUID stocké sur le client, la lecture des informations matérielles comme les numéros de séries de la carte-mère ou le serial id des disques. Je n'ai pas choisi d'utiliser l'adresse MAC pour plusieurs raisons, comme le fait qu'une machine peut en avoir plusieurs ou qu'il puisse s'agir d'adresses virtuelles réutilisées par d'autres clients (par exemple les adresses MAC docker). J'ai également préféré éviter de créer un fichier côté client pour y stocker son UUID par soucis de discrétion. Enfin, la lecture des informations systèmes nécessitent un accès root dans certains cas, ce qui est la raison pour laquelle je n'ai pas retenu cette solution. Je suis donc finalement parti sur l'usage du fichier /etc/machine-id, contenant un UUID unique généré par linux à l'installation (ou au démarrage s'il n'est pas présent).
 

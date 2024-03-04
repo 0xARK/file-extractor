@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     printf("port = %d, host = %s\n", port, host);
 
     /*
-     * The following sections allows to process the folders paths provided in parameters.
+     * The following section allows to process the folders paths provided in parameters.
      * These paths are stored in a dynamic array in order to not limit the user to a specific number of folder to monitor.
      * The length of the path string is also dynamic, to not restrict user too.
      */
@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
 
     // retrieve the list of folders to monitor
     for (i = 0; i < folders_size; i++) {
-        // argv index is the index of the next folder path to process
+        // argv index is the index of the next folder path, given in args, to process
         // argv_index = last processed arg by getopt + i
         argv_index = optind + i;
         folders[i] = (char*) malloc(strlen(argv[argv_index]));
@@ -272,8 +272,6 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
 
     // get file path and sha256 file checksum
     file_path = get_file_path(file_name, folder_path);
-    char sha256_checksum[65]; // 64 + 1 for null byte
-    sha256sum(file_path, sha256_checksum);
 
     ctx = create_context();
     sock = create_socket(port, host);
@@ -306,6 +304,8 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     SSL_write(ssl,&length_to_send,sizeof(length_to_send));
 
     // send sha256 checksum of file to server
+    char sha256_checksum[65]; // 64 + 1 for null byte
+    sha256sum(file_path, sha256_checksum);
     SSL_write(ssl, sha256_checksum, sizeof(sha256_checksum));
 
     // minus 1 for null byte if length > 0
