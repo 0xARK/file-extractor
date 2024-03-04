@@ -2,11 +2,13 @@
 
 /**
  * This client allows to monitor a list of folder for newly created files. The new files are then sent to the server
- * through a connection secured by ssl, allowing to ensure confidentiality of data.
+ * through a connection secured by ssl, allowing to ensure confidentiality of data. An integrity check is also performed
+ * by generating a sha256 checksum of files and transmit them to the server, in order to detect corrupted data. This client
+ * is identified to the server thanks to a unique id read from /etc/machine-id.
  *
- * @param argc arguments count
- * @param argv arguments value
- * @return exit code
+ * @param argc - arguments count
+ * @param argv - arguments value
+ * @return - exit status code
  */
 int main(int argc, char** argv) {
     uint16_t port = 3000;
@@ -73,6 +75,7 @@ int main(int argc, char** argv) {
         strcpy(folders[i], argv[argv_index]);
     }
 
+    // get client id and start monitoring folders
     client_id = get_client_identifier();
     printf("client id: %s\n", client_id);
     if (folders_size > 0) monitor_folder(folders, folders_size, client_id, port, host);
@@ -96,8 +99,7 @@ int main(int argc, char** argv) {
 char* get_client_identifier() {
     // /etc/machine-id contains a 32 characters identifier
     FILE* f = fopen("/etc/machine-id", "r");
-    // add 1 to store '\0' byte
-    char* uuid = (char*) malloc(32 + 1);
+    char* uuid = (char*) malloc(32 + 1); // add 1 for null byte
     fgets(uuid, 32 + 1, f);
     fclose(f);
     return uuid;
@@ -124,14 +126,14 @@ SSL_CTX* create_context() {
 static volatile sig_atomic_t watch = 1;
 
 /**
- * Allows to intercept sigint signal to stop watching folders properly
+ * This method allows to intercept sigint signal to stop watching folders properly
  */
 void int_modifier() {
     watch = 0;
 }
 
 /**
- * Allows to monitor for newly created files in a list of specific folders
+ * This method allows to monitor for newly created files in a list of specific folders
  *
  * @param folders - list of the folders to monitor
  * @param folders_size - length of the folders list
@@ -144,6 +146,7 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
     int* watch_descriptor = NULL;
     char buffer[BUF_LEN];
 
+    // initialize inotify
     file_descriptor = inotify_init();
     if (file_descriptor < 0) {
         perror("Inotify init failed");
@@ -159,6 +162,7 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
     struct sigaction int_handler = {.sa_handler=int_modifier};
     sigaction(SIGINT,&int_handler,0);
 
+    // while ctrl+c is not pressed, continue to watch for file creation events
     while (watch) {
         length = (int) read(file_descriptor, buffer, BUF_LEN);
 
@@ -174,6 +178,7 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
         }
     }
 
+    // rm watchers and free memory
     for (i = 0; i < folders_size; i++)
         (void) inotify_rm_watch(file_descriptor, watch_descriptor[i]);
     (void) close(file_descriptor);
@@ -198,6 +203,7 @@ int create_socket(int port, char* host) {
     server.sin_addr.s_addr = inet_addr(host);
     server.sin_port = htons(port);
 
+    // connect to server
     conn = connect(sock,(const struct sockaddr *)&server,(socklen_t) sizeof(server));
     if (conn < 0) {
         perror("Connection to server failed");
@@ -235,12 +241,14 @@ void sha256sum(char* path, char output[65]) {
     int bytes_read;
     int i;
 
+    // open file to read content from, in order to generate its checksum
     FILE* file = fopen(path, "rb");
     if (file == NULL) {
         perror("file open for sha256sum failed");
         exit(EXIT_FAILURE);
     }
 
+    // initialize sha256 hash
     SHA256_Init(&sha256);
     char* buffer = (char*) malloc(bufSize);
     if (buffer == NULL) {
@@ -248,14 +256,17 @@ void sha256sum(char* path, char output[65]) {
         exit(EXIT_FAILURE);
     }
 
+    // update sha256 hash with read content from opened file
     while ((bytes_read = (int) fread(buffer, 1, bufSize, file))) {
         SHA256_Update(&sha256, buffer, bytes_read);
     }
     fclose(file);
     free(buffer);
 
+    // finalize sha256 hash
     SHA256_Final(hash, &sha256);
 
+    // convert unsigned char to char string
     for (i = 0; i < SHA256_DIGEST_LENGTH; i++) {
         sprintf(output + (i * 2), "%02x", hash[i]);
     }
@@ -270,9 +281,10 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     uint16_t filename_length;
     uint16_t client_id_length;
 
-    // get file path and sha256 file checksum
+    // get file path
     file_path = get_file_path(file_name, folder_path);
 
+    // create ssl context, server socket and initialize ssl connection
     ctx = create_context();
     sock = create_socket(port, host);
     ssl = SSL_new(ctx);
@@ -303,7 +315,7 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     int length_to_send = (int) file_length;
     SSL_write(ssl,&length_to_send,sizeof(length_to_send));
 
-    // send sha256 checksum of file to server
+    // generate sha256 checksum of file and send it to server
     char sha256_checksum[65]; // 64 + 1 for null byte
     sha256sum(file_path, sha256_checksum);
     SSL_write(ssl, sha256_checksum, sizeof(sha256_checksum));

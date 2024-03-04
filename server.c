@@ -1,5 +1,16 @@
 #include "server.h"
 
+/**
+ * This server allows to listen for clients sharing new files created on their system. These files, and some others
+ * information like the connected client id, are shared through a connection secured by ssl, and then stored on the
+ * server disk in separated folders. Each folder represent a client, named according to the shared client id. An
+ * integrity check is also performed by generating a sha256 checksum of the freshly written file, and compared to the
+ * original file checksum, also shared by the client.
+ *
+ * @param argc - arguments count
+ * @param argv - arguments values
+ * @return - exit status code
+ */
 int main(int argc, char** argv) {
     uint16_t port = 3000;
     char* listener = NULL;
@@ -39,6 +50,11 @@ int main(int argc, char** argv) {
     return 0;
 }
 
+/**
+ * This method allows to create the server ssl context
+ *
+ * @return - the global ssl context of this server
+ */
 SSL_CTX* create_context() {
     const SSL_METHOD* method;
     SSL_CTX* ctx;
@@ -54,6 +70,11 @@ SSL_CTX* create_context() {
     return ctx;
 }
 
+/**
+ * This method allows to configure the ssl server context with the private key and public certificate
+ *
+ * @param ctx - the global ssl context of this server
+ */
 void configure_context(SSL_CTX *ctx) {
     // set the key and certificate
     if (SSL_CTX_use_certificate_file(ctx, "cert.pem", SSL_FILETYPE_PEM) <= 0) {
@@ -78,7 +99,7 @@ void configure_context(SSL_CTX *ctx) {
 static volatile sig_atomic_t listening = 1;
 
 /**
- * Allows to intercept sigint signal to stop listening for client properly
+ * This method to intercept sigint signal to stop listening for client properly
  */
 void int_modifier() {
     listening = 0;
@@ -94,17 +115,19 @@ int create_socket(int port, char* listener) {
         exit(EXIT_FAILURE);
     }
 
+    // initialize server socket struct
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = inet_addr(listener);
     server_addr.sin_port = htons(port);
 
+    // bind server socket to listener and port
     bind_sock = bind(passive_sock, (const struct sockaddr *)&server_addr, sizeof(server_addr));
     if (bind_sock < 0) {
         perror("Unable to bind socket");
         exit(EXIT_FAILURE);
     }
 
-    // up to 1024 pending request queue
+    // listen for client connection, up to 1024 pending request queue
     if (listen(passive_sock, 1024) < 0) {
         perror("Unable to listen socket");
         exit(EXIT_FAILURE);
@@ -124,15 +147,16 @@ void start_server(int port, char* listener) {
     struct sigaction pipe_handler = {.sa_handler=SIG_IGN};
     sigaction(SIGPIPE, &pipe_handler, 0);
 
+    // initialize SSL context and server socket
     ctx = create_context();
     configure_context(ctx);
-
     server_sock = create_socket(port, listener);
 
     // handle sigint signals to stop accept() and exit program more smoothly
     struct sigaction int_handler = {.sa_handler=int_modifier};
     sigaction(SIGINT,&int_handler,0);
 
+    // while ctrl+c is not pressed, accept client connections
     while (listening) {
         addr_len = sizeof(struct sockaddr_in);
         SSL* ssl;
@@ -142,7 +166,7 @@ void start_server(int port, char* listener) {
         SSL_set_fd(ssl, client_sock);
 
         if (SSL_accept(ssl) <= 0) {
-            // don't exit in order to quit program smoothly in case of SIGINT handling
+            // don't exit in order to quit program smoothly in case of SIGINT interception
             perror("Accept connection failed");
             close(client_sock);
             SSL_shutdown(ssl);
@@ -199,12 +223,14 @@ void sha256sum(char* path, char output[65]) {
     int bytes_read;
     int i;
 
+    // open file to read content from, in order to generate its checksum
     FILE* file = fopen(path, "rb");
     if (file == NULL) {
         perror("file open for sha256sum failed");
         exit(EXIT_FAILURE);
     }
 
+    // initialize sha256 hash
     SHA256_Init(&sha256);
     char* buffer = (char*) malloc(bufSize);
     if (buffer == NULL) {
@@ -212,14 +238,17 @@ void sha256sum(char* path, char output[65]) {
         exit(EXIT_FAILURE);
     }
 
+    // update sha256 hash with read content from opened file
     while ((bytes_read = (int) fread(buffer, 1, bufSize, file))) {
         SHA256_Update(&sha256, buffer, bytes_read);
     }
     fclose(file);
     free(buffer);
 
+    // finalize sha256 hash
     SHA256_Final(hash, &sha256);
 
+    // convert unsigned char to char string
     for (i = 0; i < SHA256_DIGEST_LENGTH; i++) {
         sprintf(output + (i * 2), "%02x", hash[i]);
     }
@@ -268,6 +297,7 @@ void client_file_handle(SSL* ssl) {
     fclose(f);
     free(file_data);
 
+    // get sha256 checksum of freshly written file, in order to compare it to received checksum received from client
     char sha256_checksum[65]; // 64 + 1 for null byte
     sha256sum(file_path, sha256_checksum);
     printf("Written file checksum: %s\n", sha256_checksum);
@@ -276,6 +306,7 @@ void client_file_handle(SSL* ssl) {
         printf("Destination path is: %s\n", file_path);
         printf("File received successfully\n");
     } else {
+        // rename file if checksum are not corresponding
         char* corrupted_file_path = get_file_path(file_name, client_id, 1);
         printf("Destination path is: %s\n", corrupted_file_path);
         printf("Received file is corrupted\n");

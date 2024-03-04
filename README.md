@@ -10,6 +10,32 @@ Création de la clé privée et du certificat pour le serveur :
 ```shell
 openssl req -newkey rsa:2048 -new -nodes -x509 -days 3650 -keyout key.pem -out cert.pem
 ```
+Compilation des exécutables via cmake :
+```shell
+cd build
+cmake ..
+make
+```
+Compilation des exécutables via gcc :
+```shell
+gcc server.c -o server -lcrypto -lssl
+gcc client.c -o client -lcrypto -lssl
+```
+
+## Usage
+
+L'exécutable du serveur doit être placé dans le même dossier que la clé privée et le certificat générés précédemment.
+
+Les exécutables peuvent être lancés en leur fournissant les arguments suivants :
+```shell
+./client -p <port> -h <host> <folder1> ...
+./server -p <port> -l <host>
+```
+Exemple d'usage :
+```shell
+./client -p 80 -h 127.0.0.1 ./monitored-folder-1/ ./monitored-folder-2/
+./server -p 80 -l 127.0.0.1
+```
 
 ## Notes
 
