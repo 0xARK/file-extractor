@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
     folders_size = argc - optind;
     folders = (char**) malloc(folders_size * sizeof(char*));
     if (folders == NULL) {
-        perror("Memory allocation for folders failed\n");
+        perror("Memory allocation for folders failed");
         exit(EXIT_FAILURE);
     }
 
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
         argv_index = optind + i;
         folders[i] = (char*) malloc(strlen(argv[argv_index]));
         if (folders[i] == NULL) {
-            perror("Memory allocation for folders[i] failed\n");
+            perror("Memory allocation for folders[i] failed");
             exit(EXIT_FAILURE);
         }
         strcpy(folders[i], argv[argv_index]);
@@ -111,7 +111,7 @@ SSL_CTX* create_context() {
 
     ctx = SSL_CTX_new(method);
     if (!ctx) {
-        perror("Unable to create SSL context\n");
+        perror("Unable to create SSL context");
         exit(EXIT_FAILURE);
     }
 
@@ -146,7 +146,7 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
 
     file_descriptor = inotify_init();
     if (file_descriptor < 0) {
-        perror("Inotify init failed\n");
+        perror("Inotify init failed");
         exit(EXIT_FAILURE);
     }
 
@@ -170,7 +170,7 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
                     transfer_file(event->name, folders[event->wd -1], client_id, port, host);
                 }
             }
-            i += EVENT_SIZE + event->len;
+            i += (int) (EVENT_SIZE + event->len);
         }
     }
 
@@ -188,7 +188,7 @@ int create_socket(int port, char* host) {
     // create socket
     sock = socket(AF_INET,SOCK_STREAM,0);
     if (sock < 0) {
-        perror("Unable to create socket\n");
+        perror("Unable to create socket");
         exit(EXIT_FAILURE);
     }
 
@@ -200,7 +200,7 @@ int create_socket(int port, char* host) {
 
     conn = connect(sock,(const struct sockaddr *)&server,(socklen_t) sizeof(server));
     if (conn < 0) {
-        perror("Connection to server failed\n");
+        perror("Connection to server failed");
         exit(EXIT_FAILURE);
     }
 
@@ -213,8 +213,6 @@ char* get_file_path(char* file_name, char* folder_path) {
     char* file_path = NULL;
     int malloc_size;
     uint16_t is_path_good;
-
-
 
     printf("The file %s was created in %s\n", file_name, folder_path);
 
@@ -230,6 +228,40 @@ char* get_file_path(char* file_name, char* folder_path) {
     return file_path;
 }
 
+void sha256sum(char* path, char output[65]) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    const int bufSize = 32768;
+    int bytes_read;
+    int i;
+
+    FILE* file = fopen(path, "rb");
+    if (file == NULL) {
+        perror("file open for sha256sum failed");
+        exit(EXIT_FAILURE);
+    }
+
+    SHA256_Init(&sha256);
+    char* buffer = (char*) malloc(bufSize);
+    if (buffer == NULL) {
+        perror("Memory allocation for sha256sum failed");
+        exit(EXIT_FAILURE);
+    }
+
+    while ((bytes_read = (int) fread(buffer, 1, bufSize, file))) {
+        SHA256_Update(&sha256, buffer, bytes_read);
+    }
+    SHA256_Final(hash, &sha256);
+
+    for(i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(output + (i * 2), "%02x", hash[i]);
+    }
+    output[64] = 0;
+
+    fclose(file);
+    free(buffer);
+}
+
 void transfer_file(char* file_name, char* folder_path, char* client_id, int port, char* host) {
     SSL_CTX* ctx;
     char* file_path = NULL;
@@ -238,13 +270,17 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     uint16_t filename_length;
     uint16_t client_id_length;
 
-    ctx = create_context();
     file_path = get_file_path(file_name, folder_path);
+    char sha256_checksum[65]; // 64 + 1 for null byte
+    sha256sum(file_path, sha256_checksum);
+    printf("sha256 checksum: %s\n", sha256_checksum);
+
+    ctx = create_context();
     sock = create_socket(port, host);
     ssl = SSL_new(ctx);
     SSL_set_fd(ssl, sock);
     if (SSL_connect(ssl) <= 0) {
-        perror("SSL connection failed\n");
+        perror("SSL connection failed");
         exit(EXIT_FAILURE);
     }
 
@@ -268,6 +304,9 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     // send file length to server
     int length_to_send = (int) file_length;
     SSL_write(ssl,&length_to_send,sizeof(length_to_send));
+
+    // send sha256 checksum of file to server
+    SSL_write(ssl, sha256_checksum, sizeof(sha256_checksum));
 
     // minus 1 for null byte if length > 0
     printf("File to send is %s, with a length of %ld\n", file_path, file_length > 0 ? file_length - 1 : 0);

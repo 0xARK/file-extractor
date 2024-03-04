@@ -17,6 +17,7 @@
 
 void monitor_folder(char **folders, int folders_size, char* client_id, int port, char* host);
 void transfer_file(char* filename, char* filepath, char* client_id, int port, char* host);
+void sha256sum(char* path, char output[65]);
 
 int create_socket(int port, char* host);
 

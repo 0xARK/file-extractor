@@ -47,7 +47,7 @@ SSL_CTX* create_context() {
 
     ctx = SSL_CTX_new(method);
     if (!ctx) {
-        perror("Unable to create SSL context\n");
+        perror("Unable to create SSL context");
         exit(EXIT_FAILURE);
     }
 
@@ -57,17 +57,17 @@ SSL_CTX* create_context() {
 void configure_context(SSL_CTX *ctx) {
     // set the key and certificate
     if (SSL_CTX_use_certificate_file(ctx, "cert.pem", SSL_FILETYPE_PEM) <= 0) {
-        perror("Can not use certificate file\n");
+        perror("Can not use certificate file");
         exit(EXIT_FAILURE);
     }
 
     if (SSL_CTX_use_PrivateKey_file(ctx, "key.pem", SSL_FILETYPE_PEM) <= 0 ) {
-        perror("Can not use private key file\n");
+        perror("Can not use private key file");
         exit(EXIT_FAILURE);
     }
 
     if (!SSL_CTX_check_private_key(ctx)) {
-        perror("Private key and public certificate doesn't match\n");
+        perror("Private key and public certificate doesn't match");
         exit(EXIT_FAILURE);
     }
 }
@@ -90,7 +90,7 @@ int create_socket(int port, char* listener) {
 
     passive_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (passive_sock < 0) {
-        perror("Unable to create socket\n");
+        perror("Unable to create socket");
         exit(EXIT_FAILURE);
     }
 
@@ -100,13 +100,13 @@ int create_socket(int port, char* listener) {
 
     bind_sock = bind(passive_sock, (const struct sockaddr *)&server_addr, sizeof(server_addr));
     if (bind_sock < 0) {
-        perror("Unable to bind socket\n");
+        perror("Unable to bind socket");
         exit(EXIT_FAILURE);
     }
 
     // up to 1024 pending request queue
     if (listen(passive_sock, 1024) < 0) {
-        perror("Unable to listen socket\n");
+        perror("Unable to listen socket");
         exit(EXIT_FAILURE);
     }
     printf("Listening...\n");
