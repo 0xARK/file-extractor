@@ -163,8 +163,9 @@ void start_server(int port, char* listener) {
     close(server_sock);
 }
 
-char* get_file_path(char* file_name, char* client_id) {
+char* get_file_path(char* file_name, char* client_id, int is_corrupted) {
     char* dest_path = "./client-files/";
+    char* corrupted = "corrupted_";
     char* folder_path;
     char* file_path;
     struct stat st = {0};
@@ -180,14 +181,49 @@ char* get_file_path(char* file_name, char* client_id) {
     free(folder_path);
 
     // build the filepath where we want to write the file content
-    file_path = (char*) malloc(strlen(dest_path) + strlen(client_id) + strlen(file_name) + 1 + 1); // add 1 for / and 1 for null byte
+    int corrupted_length = is_corrupted ? (int) strlen(corrupted) : 0;
+    file_path = (char*) malloc(strlen(dest_path) + strlen(client_id) + strlen(file_name) + corrupted_length + 1 + 1); // add 1 for / and 1 for null byte
     strcpy(file_path, dest_path);
     strcat(file_path, client_id);
     strcat(file_path, "/");
+    if (is_corrupted) strcat(file_path, corrupted);
     strcat(file_path, file_name);
-    printf("dest path: %s\n", file_path);
 
     return file_path;
+}
+
+void sha256sum(char* path, char output[65]) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    const int bufSize = 32768;
+    int bytes_read;
+    int i;
+
+    FILE* file = fopen(path, "rb");
+    if (file == NULL) {
+        perror("file open for sha256sum failed");
+        exit(EXIT_FAILURE);
+    }
+
+    SHA256_Init(&sha256);
+    char* buffer = (char*) malloc(bufSize);
+    if (buffer == NULL) {
+        perror("Memory allocation for sha256sum failed");
+        exit(EXIT_FAILURE);
+    }
+
+    while ((bytes_read = (int) fread(buffer, 1, bufSize, file))) {
+        SHA256_Update(&sha256, buffer, bytes_read);
+    }
+    fclose(file);
+    free(buffer);
+
+    SHA256_Final(hash, &sha256);
+
+    for (i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(output + (i * 2), "%02x", hash[i]);
+    }
+    output[64] = 0;
 }
 
 void client_file_handle(SSL* ssl) {
@@ -209,7 +245,15 @@ void client_file_handle(SSL* ssl) {
     int length = 0;
     SSL_read(ssl, &length, sizeof(length));
 
-    char* file_path = get_file_path(file_name, client_id);
+    // get file checksum from client
+    char original_sha256_checksum[65]; // 64 + 1 for null byte
+    SSL_read(ssl, &original_sha256_checksum, sizeof(original_sha256_checksum));
+
+    printf("\nClient %s has sent a file\nFile to receive is %s, with a length of %d byte(s)\n",
+           client_id, file_name, length);
+    printf("Original file cheksum: %s\n", original_sha256_checksum);
+
+    char* file_path = get_file_path(file_name, client_id, 0);
 
     // get file content from client and write it on disk in a file
     FILE* f = fopen(file_path, "w");
@@ -221,10 +265,23 @@ void client_file_handle(SSL* ssl) {
         fwrite(&file_data[i], 1, 1, f);
         i++;
     }
-
     fclose(f);
-
-    // free allocated memory
-    free(file_path);
     free(file_data);
+
+    char sha256_checksum[65]; // 64 + 1 for null byte
+    sha256sum(file_path, sha256_checksum);
+    printf("Written file checksum: %s\n", sha256_checksum);
+
+    if (strcmp(sha256_checksum, original_sha256_checksum) == 0) {
+        printf("Destination path is: %s\n", file_path);
+        printf("File received successfully\n");
+    } else {
+        char* corrupted_file_path = get_file_path(file_name, client_id, 1);
+        printf("Destination path is: %s\n", corrupted_file_path);
+        printf("Received file is corrupted\n");
+        rename(file_path, corrupted_file_path);
+        free(corrupted_file_path);
+    }
+
+    free(file_path);
 }

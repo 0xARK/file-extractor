@@ -29,6 +29,3 @@ Pour terminer, voici les principales librairies sur lesquelles je me suis basé 
 - getopt est utilisé côté client et serveur afin de parser les arguments fournis en entrée.
 - inotify est utilisé pour monitorer les dossiers côté client.
 - openssl est utilisé côté client et serveur, afin de sécuriser la connexion entre les deux parties grâce à TLS.
-
-# todo
-- add integrity check in transferred file (maybe with checksum ?)

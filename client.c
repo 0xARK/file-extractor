@@ -204,7 +204,7 @@ int create_socket(int port, char* host) {
         exit(EXIT_FAILURE);
     }
 
-    printf("Connected to server.\n");
+    printf("Connected to server");
 
     return sock;
 }
@@ -214,7 +214,7 @@ char* get_file_path(char* file_name, char* folder_path) {
     int malloc_size;
     uint16_t is_path_good;
 
-    printf("The file %s was created in %s\n", file_name, folder_path);
+    printf("\nThe file %s has been created in %s\n", file_name, folder_path);
 
     // build the filepath of file to transfer with path + name
     malloc_size = (int) (strlen(file_name) + strlen(folder_path) + 1); // add 1 for null byte
@@ -251,15 +251,15 @@ void sha256sum(char* path, char output[65]) {
     while ((bytes_read = (int) fread(buffer, 1, bufSize, file))) {
         SHA256_Update(&sha256, buffer, bytes_read);
     }
+    fclose(file);
+    free(buffer);
+
     SHA256_Final(hash, &sha256);
 
-    for(i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+    for (i = 0; i < SHA256_DIGEST_LENGTH; i++) {
         sprintf(output + (i * 2), "%02x", hash[i]);
     }
     output[64] = 0;
-
-    fclose(file);
-    free(buffer);
 }
 
 void transfer_file(char* file_name, char* folder_path, char* client_id, int port, char* host) {
@@ -270,10 +270,10 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     uint16_t filename_length;
     uint16_t client_id_length;
 
+    // get file path and sha256 file checksum
     file_path = get_file_path(file_name, folder_path);
     char sha256_checksum[65]; // 64 + 1 for null byte
     sha256sum(file_path, sha256_checksum);
-    printf("sha256 checksum: %s\n", sha256_checksum);
 
     ctx = create_context();
     sock = create_socket(port, host);
@@ -284,7 +284,7 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
         exit(EXIT_FAILURE);
     }
 
-    printf("Connected with %s encryption\n", SSL_get_cipher(ssl));
+    printf(", with %s encryption\n", SSL_get_cipher(ssl));
 
     // send client id length and client id to server
     client_id_length = (uint16_t) strlen(client_id);
@@ -309,7 +309,8 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     SSL_write(ssl, sha256_checksum, sizeof(sha256_checksum));
 
     // minus 1 for null byte if length > 0
-    printf("File to send is %s, with a length of %ld\n", file_path, file_length > 0 ? file_length - 1 : 0);
+    printf("File to send is %s, with a length of %ld byte(s)\nsha256sum: %s\n",
+           file_path, file_length > 0 ? file_length - 1 : 0, sha256_checksum);
 
     // send file content to server
     FILE* f = fopen(file_path, "r");
@@ -317,13 +318,14 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
         char c = (char) fgetc(f);
         SSL_write(ssl, &c, sizeof(c));
     }
-
     fclose(f);
     close(sock);
-    SSL_shutdown(ssl);
 
-    // free allocated memory
-    free(file_path);
+    // shutdown ssl
+    SSL_shutdown(ssl);
     SSL_free(ssl);
     SSL_CTX_free(ctx);
+
+    printf("File %s has been sent\n", file_path);
+    free(file_path);
 }
