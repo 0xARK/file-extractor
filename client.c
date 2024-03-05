@@ -263,31 +263,25 @@ char* get_file_path(char* file_name, char* folder_path) {
 void sha256sum(char* path, char output[65]) {
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256_CTX sha256;
-    const int bufSize = 32768;
+    char buffer[1024];
     int bytes_read;
     int i;
 
     // open file to read content from, in order to generate its checksum
-    FILE* file = fopen(path, "rb");
-    if (file == NULL) {
+    FILE* f = fopen(path, "rb");
+    if (f == NULL) {
         perror("file open for sha256sum failed");
         exit(EXIT_FAILURE);
     }
 
     // initialize sha256 hash
     SHA256_Init(&sha256);
-    char* buffer = (char*) malloc(bufSize);
-    if (buffer == NULL) {
-        perror("Memory allocation for sha256sum failed");
-        exit(EXIT_FAILURE);
-    }
 
     // update sha256 hash with read content from opened file
-    while ((bytes_read = (int) fread(buffer, 1, bufSize, file))) {
+    while ((bytes_read = (int) fread(buffer, 1, sizeof(buffer), f)) > 0) {
         SHA256_Update(&sha256, buffer, bytes_read);
     }
-    fclose(file);
-    free(buffer);
+    fclose(f);
 
     // finalize sha256 hash
     SHA256_Final(hash, &sha256);
@@ -311,19 +305,22 @@ void sha256sum(char* path, char output[65]) {
  * @param host - the server host address to which we want to send the file
  */
 void transfer_file(char* file_name, char* folder_path, char* client_id, int port, char* host) {
-    SSL_CTX* ctx;
-    char* file_path = NULL;
     int sock;
+    SSL_CTX* ctx;
     SSL* ssl;
+    char* file_path;
     uint16_t filename_length;
     uint16_t client_id_length;
+    struct stat sb;
+    int file_length;
+    char sha256_checksum[65]; // 64 + 1 for null byte
 
     // get file path
     file_path = get_file_path(file_name, folder_path);
 
-    // create ssl context, server socket and initialize ssl connection
-    ctx = create_context();
+    // create server socket, ssl context, and initialize ssl connection
     sock = create_socket(port, host);
+    ctx = create_context();
     ssl = SSL_new(ctx);
     SSL_set_fd(ssl, sock);
     if (SSL_connect(ssl) <= 0) {
@@ -343,23 +340,16 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     SSL_write(ssl, &filename_length, sizeof(filename_length));
     SSL_write(ssl, file_name, filename_length + 1); // add 1 for null byte
 
-    // get file length
-    struct stat sb;
+    // get file length and send it to server
     stat(file_path, &sb);
-    off_t file_length = sb.st_size;
-
-    // send file length to server
-    int length_to_send = (int) file_length;
-    SSL_write(ssl,&length_to_send,sizeof(length_to_send));
+    file_length = (int) sb.st_size;
+    SSL_write(ssl, &file_length, sizeof(file_length));
 
     // generate sha256 checksum of file and send it to server
-    char sha256_checksum[65]; // 64 + 1 for null byte
     sha256sum(file_path, sha256_checksum);
     SSL_write(ssl, sha256_checksum, sizeof(sha256_checksum));
 
-    // minus 1 for null byte if length > 0
-    printf("File to send is %s, with a length of %ld byte(s)\nsha256sum: %s\n",
-           file_path, file_length > 0 ? file_length - 1 : 0, sha256_checksum);
+    printf("File to send is %s, with a length of %d byte(s)\nsha256sum: %s\n", file_path, file_length, sha256_checksum);
 
     // send file content to server
     FILE* f = fopen(file_path, "r");

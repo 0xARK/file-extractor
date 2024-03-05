@@ -215,15 +215,21 @@ void start_server(int port, char* listener) {
 char* get_file_path(char* file_name, char* client_id, int is_corrupted) {
     char* dest_path = "./client-files/";
     char* corrupted = "corrupted_";
-    char* folder_path;
+    char* folder_path = NULL;
     char* file_path;
-    struct stat st = {0};
+    struct stat st_server = {0};
+    struct stat st_client = {0};
+
+    if (stat(dest_path, &st_server) == -1) {
+        printf("Server folder %s does not exist, creating it\n", dest_path);
+        mkdir(dest_path, 0744);
+    }
 
     // create client folder if it doesn't exist
     folder_path = (char*) malloc(strlen(dest_path) + strlen(client_id) + 1); // add 1 for null byte
     strcpy(folder_path, dest_path);
     strcat(folder_path, client_id);
-    if (stat(folder_path, &st) == -1) {
+    if (stat(folder_path, &st_client) == -1) {
         printf("Client folder %s does not exist, creating it\n", folder_path);
         mkdir(folder_path, 0744);
     }
@@ -250,7 +256,7 @@ char* get_file_path(char* file_name, char* client_id, int is_corrupted) {
 void sha256sum(char* path, char output[65]) {
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256_CTX sha256;
-    const int bufSize = 32768;
+    char buffer[1024];
     int bytes_read;
     int i;
 
@@ -263,18 +269,12 @@ void sha256sum(char* path, char output[65]) {
 
     // initialize sha256 hash
     SHA256_Init(&sha256);
-    char* buffer = (char*) malloc(bufSize);
-    if (buffer == NULL) {
-        perror("Memory allocation for sha256sum failed");
-        exit(EXIT_FAILURE);
-    }
 
     // update sha256 hash with read content from opened file
-    while ((bytes_read = (int) fread(buffer, 1, bufSize, file))) {
+    while ((bytes_read = (int) fread(buffer, 1, sizeof(buffer), file))) {
         SHA256_Update(&sha256, buffer, bytes_read);
     }
     fclose(file);
-    free(buffer);
 
     // finalize sha256 hash
     SHA256_Final(hash, &sha256);
@@ -295,38 +295,41 @@ void sha256sum(char* path, char output[65]) {
  * @param ssl - the ssl connection between the client and this server
  */
 void client_file_handle(SSL* ssl) {
-    // receive client id length from client
     uint16_t client_id_length;
+    uint16_t file_name_length;
+    int length = 0;
+    char original_sha256_checksum[65]; // 64 + 1 for null byte
+    char sha256_checksum[65]; // 64 + 1 for null byte
+    char* file_path;
+    char* file_data = NULL;
+    int i = 0;
+
+    // receive client id length from client
     SSL_read(ssl, &client_id_length, sizeof(client_id_length));
     // receive client id from client
     char client_id[client_id_length + 1]; // add 1 for null byte
     SSL_read(ssl, client_id, client_id_length + 1); // add 1 for null byte
 
     // get filename length from client
-    uint16_t file_name_length;
     SSL_read(ssl, &file_name_length, sizeof(file_name_length));
     // get filename from client
     char file_name[file_name_length + 1]; // add 1 for null byte
     SSL_read(ssl, &file_name, file_name_length + 1); // add 1 for null byte
 
     // get file length from client
-    int length = 0;
     SSL_read(ssl, &length, sizeof(length));
 
     // get file checksum from client
-    char original_sha256_checksum[65]; // 64 + 1 for null byte
     SSL_read(ssl, &original_sha256_checksum, sizeof(original_sha256_checksum));
 
-    printf("\nClient %s has sent a file\nFile to receive is %s, with a length of %d byte(s)\n",
-           client_id, file_name, length);
+    printf("\nClient %s has sent a file\nFile to receive is %s, with a length of %d byte(s)\n", client_id, file_name, length);
     printf("Original file cheksum: %s\n", original_sha256_checksum);
 
-    char* file_path = get_file_path(file_name, client_id, 0);
+    file_path = get_file_path(file_name, client_id, 0);
 
     // get file content from client and write it on disk in a file
     FILE* f = fopen(file_path, "w");
-    char* file_data = malloc(length);
-    int i = 0;
+    file_data = malloc(length);
     while (i < length) {
         SSL_read(ssl, &file_data[i], sizeof(file_data[i]));
         if (&file_data[i] == NULL) break;
@@ -337,7 +340,6 @@ void client_file_handle(SSL* ssl) {
     free(file_data);
 
     // get sha256 checksum of freshly written file, in order to compare it to received checksum received from client
-    char sha256_checksum[65]; // 64 + 1 for null byte
     sha256sum(file_path, sha256_checksum);
     printf("Written file checksum: %s\n", sha256_checksum);
 
