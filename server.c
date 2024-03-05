@@ -105,6 +105,13 @@ void int_modifier() {
     listening = 0;
 }
 
+/**
+ * This method allows to create a server socket, bind it to a port and a listening address and listen it
+ *
+ * @param port - the port on which we want to bind our server socket
+ * @param listener - the host on which we want to listen for incoming connection
+ * @return - the server socket
+ */
 int create_socket(int port, char* listener) {
     int passive_sock, bind_sock;
     struct sockaddr_in server_addr;
@@ -137,6 +144,15 @@ int create_socket(int port, char* listener) {
     return passive_sock;
 }
 
+/**
+ * This method allows to start a socket server secured by SSL, listening for client connection while CTRL+C is not pressed,
+ * and accepting incoming connections. Once a connection is accepted, a new child process is created in order to process
+ * the information sent by this client. Then, both SSL connection and client socket are closed. Finally, we close the
+ * server socket, once CTRL+C has been pressed.
+ *
+ * @param port - the port on which we want to bind our server socket
+ * @param listener - the host on which we want to listen for incoming connection
+ */
 void start_server(int port, char* listener) {
     int server_sock, client_sock;
     socklen_t addr_len;
@@ -187,6 +203,15 @@ void start_server(int port, char* listener) {
     close(server_sock);
 }
 
+/**
+ * This method allows to build the file path where we want to store the received file from client or to rename the file
+ * in case it's corrupted
+ *
+ * @param file_name - file name of the received file
+ * @param client_id - client id from who we received this file
+ * @param is_corrupted - boolean to know if we want to rename a file because it's corrupted
+ * @return - the complete destination path of the file to store
+ */
 char* get_file_path(char* file_name, char* client_id, int is_corrupted) {
     char* dest_path = "./client-files/";
     char* corrupted = "corrupted_";
@@ -216,6 +241,12 @@ char* get_file_path(char* file_name, char* client_id, int is_corrupted) {
     return file_path;
 }
 
+/**
+ * This method allows to compute the sha256 checksum of a file based on it's content
+ *
+ * @param path - the path of the file from which we want the checksum
+ * @param output - the generated sha256 checksum
+ */
 void sha256sum(char* path, char output[65]) {
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256_CTX sha256;
@@ -255,6 +286,14 @@ void sha256sum(char* path, char output[65]) {
     output[64] = 0;
 }
 
+/**
+ * This method allows to process client information after that our server accepted the connection. Multiple information
+ * are received and processed, like the client id sending the file, the file length, the file name, the sha256 checksum
+ * of the original file and the file itself. The received file is then written on the disk, in the right client folder
+ * and it's integrity is verified. File is renamed if the written file is corrupted.
+ *
+ * @param ssl - the ssl connection between the client and this server
+ */
 void client_file_handle(SSL* ssl) {
     // receive client id length from client
     uint16_t client_id_length;
@@ -302,6 +341,7 @@ void client_file_handle(SSL* ssl) {
     sha256sum(file_path, sha256_checksum);
     printf("Written file checksum: %s\n", sha256_checksum);
 
+    // rename file if it's corrupted
     if (strcmp(sha256_checksum, original_sha256_checksum) == 0) {
         printf("Destination path is: %s\n", file_path);
         printf("File received successfully\n");

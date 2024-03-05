@@ -92,7 +92,8 @@ int main(int argc, char** argv) {
 }
 
 /**
- * Allows to get a unique identifier for each client
+ * This method allows to get a unique identifier for each client. This identifier is read from the /etc/machine-id file,
+ * containing a unique identifier generated during the installation or the boot process if it's not present.
  *
  * @return - the unique identifier of the machine where the client is running on
  */
@@ -105,6 +106,11 @@ char* get_client_identifier() {
     return uuid;
 }
 
+/**
+ * This method allows to create the client ssl context
+ *
+ * @return - the global ssl context of this client
+ */
 SSL_CTX* create_context() {
     const SSL_METHOD* method;
     SSL_CTX* ctx;
@@ -186,6 +192,13 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
     free(watch_descriptor);
 }
 
+/**
+ * This method allows to create a client socket and connect to server with it's host address and it's listening port
+ *
+ * @param port - the server port to which we want to connect
+ * @param host - the server host address to which we want to connect
+ * @return - the client socket
+ */
 int create_socket(int port, char* host) {
     int sock;
     int conn;
@@ -215,6 +228,13 @@ int create_socket(int port, char* host) {
     return sock;
 }
 
+/**
+ * This method allows to build the file path that we want to send to the server.
+ *
+ * @param file_name - file name of the file to transmit
+ * @param folder_path - the folder where the file to send is stored
+ * @return - the complete path of the file to send
+ */
 char* get_file_path(char* file_name, char* folder_path) {
     char* file_path = NULL;
     int malloc_size;
@@ -234,6 +254,12 @@ char* get_file_path(char* file_name, char* folder_path) {
     return file_path;
 }
 
+/**
+ * This method allows to compute the sha256 checksum of a file based on it's content
+ *
+ * @param path - the path of the file from which we want the checksum
+ * @param output - the generated sha256 checksum
+ */
 void sha256sum(char* path, char output[65]) {
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256_CTX sha256;
@@ -273,6 +299,17 @@ void sha256sum(char* path, char output[65]) {
     output[64] = 0;
 }
 
+/**
+ * This method allows to share all the needed information to share to a server the newly created file in a monitored
+ * folder. These information include the file name, the file length, the client id, the sha256 checksum of the original
+ * file and the file itself.
+ *
+ * @param file_name - name of the newly created file
+ * @param folder_path - path of the folder where the file has been created
+ * @param client_id - the unique client id of this client
+ * @param port - the server port to which we want to send the file
+ * @param host - the server host address to which we want to send the file
+ */
 void transfer_file(char* file_name, char* folder_path, char* client_id, int port, char* host) {
     SSL_CTX* ctx;
     char* file_path = NULL;
