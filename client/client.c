@@ -179,6 +179,11 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
                 if (event->mask & IN_CREATE) {
                     // use fork system call to create a child process in order to not block next received events
                     if (fork() == 0) {
+                        // We sleep before opening and transferring file, in order to let system write large file content
+                        // in the monitored folder. There is certainly a less ugly way to wait for file to be completely
+                        // written, but I didn't have enough time to digg more. I tried to use the IN_CLOSE_WRITE event,
+                        // however it was also triggered when file was modified, but we want to get new created files only.
+                        sleep(1);
                         transfer_file(event->name, folders[event->wd - 1], client_id, port, host);
                         exit(EXIT_SUCCESS);
                     }
