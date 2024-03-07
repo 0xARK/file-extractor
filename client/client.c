@@ -162,7 +162,7 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
     watch_descriptor = (int*) malloc(folders_size * sizeof(int));
     // number of inotify_add_watch calls are limited by value in /proc/sys/fs/inotify/max_user_watches
     for (i = 0; i < folders_size; i++)
-        watch_descriptor[i] = inotify_add_watch(file_descriptor, folders[i] ,IN_CREATE);
+        watch_descriptor[i] = inotify_add_watch(file_descriptor, folders[i] ,IN_CLOSE_WRITE);
 
     // handle sigint signals to stop read() and exit program more smoothly
     struct sigaction int_handler = {.sa_handler=int_modifier};
@@ -176,14 +176,9 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
         while (i < length) {
             struct inotify_event *event = (struct inotify_event *) &buffer[i];
             if (event->len) {
-                if (event->mask & IN_CREATE) {
+                if (event->mask & IN_CLOSE_WRITE) {
                     // use fork system call to create a child process in order to not block next received events
                     if (fork() == 0) {
-                        // We sleep before opening and transferring file, in order to let system write large file content
-                        // in the monitored folder. There is certainly a less ugly way to wait for file to be completely
-                        // written, but I didn't have enough time to digg more. I tried to use the IN_CLOSE_WRITE event,
-                        // however it was also triggered when file was modified, but we want to get new created files only.
-                        sleep(1);
                         transfer_file(event->name, folders[event->wd - 1], client_id, port, host);
                         exit(EXIT_SUCCESS);
                     }
