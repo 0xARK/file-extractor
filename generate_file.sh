@@ -1,9 +1,10 @@
 #!/bin/bash
-for i in {1..100}
+for i in {1..20}
 do
   echo "creating file $i"
-  echo "uwu_uwu_uwu" > "./monitored-folder-2/$i"
-  sleep 0.5
+  echo "test_test_test" > "./monitored-folder/$i.txt"
+  sleep 0.1
 done
 
-rm ./monitored-folder-2/*
+sleep 1
+rm ./monitored-folder/*.txt

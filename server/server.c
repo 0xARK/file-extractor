@@ -301,8 +301,6 @@ void client_file_handle(SSL* ssl) {
     char original_sha256_checksum[65]; // 64 + 1 for null byte
     char sha256_checksum[65]; // 64 + 1 for null byte
     char* file_path;
-    char* file_data = NULL;
-    int i = 0;
 
     // receive client id length from client
     SSL_read(ssl, &client_id_length, sizeof(client_id_length));
@@ -314,13 +312,13 @@ void client_file_handle(SSL* ssl) {
     SSL_read(ssl, &file_name_length, sizeof(file_name_length));
     // get filename from client
     char file_name[file_name_length + 1]; // add 1 for null byte
-    SSL_read(ssl, &file_name, file_name_length + 1); // add 1 for null byte
+    SSL_read(ssl, file_name, file_name_length + 1); // add 1 for null byte
 
     // get file length from client
     SSL_read(ssl, &length, sizeof(length));
 
     // get file checksum from client
-    SSL_read(ssl, &original_sha256_checksum, sizeof(original_sha256_checksum));
+    SSL_read(ssl, original_sha256_checksum, sizeof(original_sha256_checksum));
 
     printf("\nClient %s has sent a file\nFile to receive is %s, with a length of %d byte(s)\n", client_id, file_name, length);
     printf("Original file cheksum: %s\n", original_sha256_checksum);
@@ -328,16 +326,34 @@ void client_file_handle(SSL* ssl) {
     file_path = get_file_path(file_name, client_id, 0);
 
     // get file content from client and write it on disk in a file
-    FILE* f = fopen(file_path, "w");
-    file_data = malloc(length);
-    while (i < length) {
-        SSL_read(ssl, &file_data[i], sizeof(file_data[i]));
-        if (&file_data[i] == NULL) break;
-        fwrite(&file_data[i], 1, 1, f);
-        i++;
+    FILE* f = fopen(file_path, "wb");
+    if (f == NULL) perror("Can't open file");
+    // set the receiving buffer
+    char buffer[CHUNK_SIZE];
+    memset(buffer, 0x00, sizeof(buffer));
+    // we define the total number of data to receive
+    int total_bytes_to_receive = length;
+    int received_bytes;
+
+    while (total_bytes_to_receive > 0) {
+        // we read either CHUNK_SIZE bytes or total_bytes_to_receive if the number of remaining bytes is less than CHUNK_SIZE
+        received_bytes = SSL_read(ssl, buffer, total_bytes_to_receive > CHUNK_SIZE ? CHUNK_SIZE : total_bytes_to_receive);
+        // if we received bytes, write them to the file, otherwise break the loop
+        if (received_bytes > 0) {
+            total_bytes_to_receive -= received_bytes;
+            fwrite(buffer, 1, received_bytes, f);
+            memset(buffer, 0x00, CHUNK_SIZE);
+        } else if (received_bytes == -1) {
+            perror("An error occurred while receiving file");
+            break;
+        } else {
+            break;
+        }
     }
     fclose(f);
-    free(file_data);
+
+    uint8_t response = 1;
+    SSL_write(ssl, &response, sizeof(response));
 
     // get sha256 checksum of freshly written file, in order to compare it to received checksum received from client
     sha256sum(file_path, sha256_checksum);

@@ -177,7 +177,11 @@ void monitor_folder(char** folders, int folders_size, char* client_id, int port,
             struct inotify_event *event = (struct inotify_event *) &buffer[i];
             if (event->len) {
                 if (event->mask & IN_CREATE) {
-                    transfer_file(event->name, folders[event->wd -1], client_id, port, host);
+                    // use fork system call to create a child process in order to not block next received events
+                    if (fork() == 0) {
+                        transfer_file(event->name, folders[event->wd - 1], client_id, port, host);
+                        exit(EXIT_SUCCESS);
+                    }
                 }
             }
             i += (int) (EVENT_SIZE + event->len);
@@ -352,12 +356,22 @@ void transfer_file(char* file_name, char* folder_path, char* client_id, int port
     printf("File to send is %s, with a length of %d byte(s)\nsha256sum: %s\n", file_path, file_length, sha256_checksum);
 
     // send file content to server
-    FILE* f = fopen(file_path, "r");
-    while(!feof(f)) {
-        char c = (char) fgetc(f);
-        SSL_write(ssl, &c, sizeof(c));
+    FILE* f = fopen(file_path, "rb");
+    if (f == NULL) perror("Can't open file");
+    // set the send buffer
+    char data[CHUNK_SIZE];
+    memset(data, 0x00, sizeof(data));
+    // read file content and send it while content has been read
+    while (fread(data, 1, sizeof(data), f) > 0) {
+        if (SSL_write(ssl, data, sizeof(data)) < 0) perror("An error occurred while sending file");
+        memset(data, 0x00, sizeof(data));
     }
     fclose(f);
+
+    // wait for server response to close connection
+    uint8_t response;
+    SSL_read(ssl, &response, sizeof(response));
+    printf("Server answered, closing connection\n");
     close(sock);
 
     // shutdown ssl

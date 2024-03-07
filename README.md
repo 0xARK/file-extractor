@@ -2,6 +2,8 @@
 
 > La clé privée et le certificat publique du serveur ont été inclu dans le rendu. Cela signifie qu'ils ont été push sur github, et même s'il s'agit d'un repository privé, ce n'est pas une bonne pratique. Je l'ai effectué car je souhaitais que vous n'ayez qu'à lancer une commande pour tester le projet, cependant il est possible de regénérer ces clés en suivant les étapes indiquées ci-dessous.
 
+> Les exécutables pré-compilés de la dernière version ont été également inclu dans le rendu. Cependant, il est possible de les regénérer en suivant les étapes décrites ci-dessous.
+ 
 Installation du package libssl pour le développement :
 ```shell
 sudo apt-get install libssl-dev
@@ -16,6 +18,7 @@ cd build
 cmake ..
 make
 ```
+Les exécutables générés par cmake sont ensuite respectivement placés dans les dossiers `server/` et `client/`
 Compilation des exécutables via gcc :
 ```shell
 gcc server.c -o server -lcrypto -lssl
@@ -24,17 +27,19 @@ gcc client.c -o client -lcrypto -lssl
 
 ## Usage
 
-L'exécutable du serveur doit être placé dans le même dossier que la clé privée et le certificat générés précédemment.
+Le dépôt github contient tous les fichiers nécessaires pour effectuer des tests. Il est donc possible de tester ce projet simplement en lançant les commandes suivantes :
+```shell
+./client -p 80 -h 127.0.0.1 ./monitored-folder/
+./server -p 80 -l 127.0.0.1
+bash generate_file.sh
+```
+Les fichiers reçus par le serveur peuvent être observés dans le dossier `server/client-files/<client-id>/`, généré automatiquement.
+> L'exécutable du serveur doit être placé dans le même dossier que la clé privée et le certificat générés précédemment.
 
-Les exécutables peuvent être lancés en leur fournissant les arguments suivants :
+De manière plus générale, les exécutables peuvent être lancés en leur fournissant les arguments suivants :
 ```shell
 ./client -p <port> -h <host> <folder1> ...
 ./server -p <port> -l <host>
-```
-Exemple d'usage :
-```shell
-./client -p 80 -h 127.0.0.1 ./monitored-folder-1/ ./monitored-folder-2/
-./server -p 80 -l 127.0.0.1
 ```
 
 ## Notes

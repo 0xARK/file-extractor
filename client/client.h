@@ -12,8 +12,9 @@
 #ifndef SERVER_CLIENT_H
 #define SERVER_CLIENT_H
 
-#define EVENT_SIZE      (sizeof(struct inotify_event))
-#define BUF_LEN         (1024 * (EVENT_SIZE + 16))
+#define EVENT_SIZE (sizeof(struct inotify_event))
+#define BUF_LEN    (1024 * (EVENT_SIZE + 16))
+#define CHUNK_SIZE 1024
 
 void monitor_folder(char **folders, int folders_size, char* client_id, int port, char* host);
 void transfer_file(char* filename, char* filepath, char* client_id, int port, char* host);
